@@ -30,3 +30,15 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Embedded win-acme distribution (downloaded by Makefile)
+embed/wacs.zip
+
+# Generated Windows resource files
+*.syso
+
+# Build output
+win-acme-gui.exe
+
+# Log files
+*.log
