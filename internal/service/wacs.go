@@ -57,20 +57,37 @@ func (s *wacsService) WacsExePath() string {
 }
 
 // run executes wacs.exe with the given arguments, capturing combined output.
+//
+// stdin is deliberately empty rather than inherited: wacs.exe is an interactive
+// console application, and any prompt it reaches would otherwise block forever
+// behind a GUI that has no console to type into.
 func (s *wacsService) run(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, s.wacsExe, args...)
 	cmd.Dir = filepath.Dir(s.wacsExe)
+	cmd.Stdin = nil
+
 	output, err := cmd.CombinedOutput()
-	return string(output), err
+	return StripANSI(string(output)), err
 }
 
+// ListRenewals returns the managed renewals.
+//
+// Two sources are combined. win-acme's *.renewal.json files are its own
+// persisted state: structured, stable, and the only place the hostnames and
+// renewal IDs appear at all. The `--list` console output is a human-readable
+// view whose layout is not a documented interface, so it is used to confirm
+// wacs is healthy and as a fallback when the renewal files cannot be located
+// (for example a non-default ConfigPath).
 func (s *wacsService) ListRenewals(ctx context.Context) ([]model.Renewal, string, error) {
 	output, err := s.run(ctx, "--list", "--closeonfinish")
 	if err != nil {
 		return nil, output, fmt.Errorf("wacs --list failed: %w\nOutput: %s", err, output)
 	}
-	renewals := ParseRenewalList(output)
-	return renewals, output, nil
+
+	if renewals, ferr := ReadRenewalFiles(DiscoverConfigDir()); ferr == nil && len(renewals) > 0 {
+		return renewals, output, nil
+	}
+	return ParseRenewalList(output), output, nil
 }
 
 func (s *wacsService) CreateCertificate(ctx context.Context, req model.CertificateRequest) (string, error) {
@@ -110,6 +127,7 @@ func (s *wacsService) Version(ctx context.Context) (string, error) {
 func (s *wacsService) RunStreaming(ctx context.Context, args []string, onLine func(string)) error {
 	cmd := exec.CommandContext(ctx, s.wacsExe, args...)
 	cmd.Dir = filepath.Dir(s.wacsExe)
+	cmd.Stdin = nil
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -123,13 +141,17 @@ func (s *wacsService) RunStreaming(ctx context.Context, args []string, onLine fu
 
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
-		onLine(scanner.Text())
+		onLine(StripANSI(scanner.Text()))
 	}
 
 	return cmd.Wait()
 }
 
 // BuildCreateArgs constructs CLI arguments from a CertificateRequest.
+//
+// The flag names here were checked against the win-acme source at tag
+// v2.2.9.1701. Note that the IIS site id differs by role: --siteid selects the
+// source bindings, --installationsiteid the installation target.
 func BuildCreateArgs(req model.CertificateRequest) []string {
 	args := []string{
 		"--source", string(req.Source),
@@ -199,6 +221,15 @@ func BuildCreateArgs(req model.CertificateRequest) []string {
 	}
 	if req.Installation == model.InstallationScript && req.ScriptPath != "" {
 		args = append(args, "--script", req.ScriptPath)
+	}
+
+	// Account registration. Without these an unattended run blocks on the
+	// terms-of-service prompt instead of completing.
+	if req.EmailAddress != "" {
+		args = append(args, "--emailaddress", req.EmailAddress)
+	}
+	if req.AcceptTOS {
+		args = append(args, "--accepttos")
 	}
 
 	// Flags
