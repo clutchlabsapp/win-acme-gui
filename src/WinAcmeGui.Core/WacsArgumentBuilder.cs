@@ -73,15 +73,29 @@ public static class WacsArgumentBuilder
     /// Runs a renewal now. Without <paramref name="force"/> win-acme skips
     /// certificates that are not due yet, which is what the scheduled task does.
     /// </summary>
+    /// <param name="renewalId">Targets one renewal by id.</param>
+    /// <param name="friendlyName">
+    /// Targets one renewal by name, used when the id is unknown — <c>--list</c> prints
+    /// friendly names but not ids. Ignored when <paramref name="renewalId"/> is given.
+    /// </param>
     public static WacsCommand BuildRenewNow(
         string wacsPath,
         string? renewalId = null,
+        string? friendlyName = null,
         bool force = false,
         bool useTestServer = false)
     {
         var args = new ArgumentList();
         args.Add("--renew");
-        args.AddIfPresent("--id", renewalId);
+
+        if (!string.IsNullOrWhiteSpace(renewalId))
+        {
+            args.Add("--id", renewalId.Trim());
+        }
+        else
+        {
+            args.AddIfPresent("--friendlyname", friendlyName);
+        }
 
         if (force)
         {

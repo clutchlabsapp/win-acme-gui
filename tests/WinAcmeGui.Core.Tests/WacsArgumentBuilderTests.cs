@@ -226,6 +226,29 @@ public class WacsArgumentBuilderTests
     }
 
     [Fact]
+    public void RenewNowFallsBackToTheFriendlyNameWhenThereIsNoId()
+    {
+        var args = WacsArgumentBuilder
+            .BuildRenewNow(TestData.WacsPath, friendlyName: "Example cert", force: true)
+            .ArgumentValues;
+
+        Assert.Equal(
+            new[] { "--renew", "--friendlyname", "Example cert", "--force", "--verbose" },
+            args);
+    }
+
+    [Fact]
+    public void AnIdWinsOverAFriendlyName()
+    {
+        var args = WacsArgumentBuilder
+            .BuildRenewNow(TestData.WacsPath, renewalId: "abc123", friendlyName: "Example cert")
+            .ArgumentValues;
+
+        Assert.Contains("--id", args);
+        Assert.DoesNotContain("--friendlyname", args);
+    }
+
+    [Fact]
     public void RenewNowWithoutAnIdRenewsEverythingThatIsDue()
     {
         var args = WacsArgumentBuilder.BuildRenewNow(TestData.WacsPath).ArgumentValues;
