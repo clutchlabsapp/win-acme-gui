@@ -42,11 +42,11 @@ internal sealed class PluginFieldPanel : Panel
 
         Controls.Clear();
 
-        var grid = Layout.Grid();
+        var grid = Ui.Grid();
 
         if (!string.IsNullOrEmpty(plugin.Description))
         {
-            Layout.AddHint(grid, plugin.Description);
+            Ui.AddHint(grid, plugin.Description);
         }
 
         foreach (var field in plugin.Fields)
@@ -94,7 +94,7 @@ internal sealed class PluginFieldPanel : Panel
 
             check.CheckedChanged += RaiseValuesChanged;
             _inputs[field.Name] = check;
-            Layout.AddFullWidth(grid, check, field.Help);
+            Ui.AddFullWidth(grid, check, field.Help);
             return;
         }
 
@@ -108,7 +108,7 @@ internal sealed class PluginFieldPanel : Panel
         _inputs[field.Name] = input;
 
         var label = field.Required ? field.Label + " *" : field.Label;
-        Layout.AddRow(grid, label, input, field.Help);
+        Ui.AddRow(grid, label, input, field.Help);
     }
 
     private void RaiseValuesChanged(object? sender, EventArgs e) =>

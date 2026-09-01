@@ -46,7 +46,7 @@ public static class WacsArgumentBuilder
 
         // Always say something about installation, otherwise win-acme may fall back
         // to its interactive prompt and the run hangs with nobody to answer it.
-        args.Add("--installation", "none");
+        AddInstallation(args, wacsPath, definition.Installation);
 
         if (definition.Account.UseTestServer)
         {
@@ -111,6 +111,81 @@ public static class WacsArgumentBuilder
         args.Add("--verbose");
 
         return new WacsCommand(wacsPath, args.ToArray());
+    }
+
+    /// <summary>
+    /// win-acme takes a comma-separated list of installation plugins but only one
+    /// script, so at most two steps are possible: IIS bindings and one script.
+    /// </summary>
+    private static void AddInstallation(ArgumentList args, string wacsPath, InstallationSettings installation)
+    {
+        var preset = InstallationPresets.Find(installation.ScriptPresetId) ?? InstallationPresets.None;
+        var runsScript = !preset.IsNone;
+
+        var steps = new List<string>();
+        if (installation.UpdateIisBindings)
+        {
+            steps.Add("iis");
+        }
+
+        if (runsScript)
+        {
+            steps.Add("script");
+        }
+
+        args.Add("--installation", steps.Count == 0 ? "none" : string.Join(",", steps));
+
+        if (installation.UpdateIisBindings)
+        {
+            args.AddIfPresent("--installationsiteid", installation.IisSiteId);
+            args.AddIfPresent("--sslport", installation.SslPort);
+            args.AddIfPresent("--sslipaddress", installation.SslIpAddress);
+        }
+
+        if (runsScript)
+        {
+            args.AddIfPresent("--script", ResolveScriptPath(wacsPath, preset, installation));
+            args.AddIfPresent("--scriptparameters", ResolveScriptParameters(preset, installation));
+        }
+    }
+
+    /// <summary>
+    /// Bundled presets live in the Scripts folder next to wacs.exe; the custom preset
+    /// uses whatever the user browsed to.
+    /// </summary>
+    public static string ResolveScriptPath(
+        string wacsPath,
+        InstallationScriptPreset preset,
+        InstallationSettings installation)
+    {
+        ArgumentNullException.ThrowIfNull(preset);
+        ArgumentNullException.ThrowIfNull(installation);
+
+        if (preset.IsNone)
+        {
+            return string.Empty;
+        }
+
+        if (preset.IsCustom)
+        {
+            return installation.ScriptPath.Trim();
+        }
+
+        var scripts = WacsLocator.ScriptsFolder(wacsPath);
+        return scripts.Length == 0 ? preset.ScriptFileName : Path.Combine(scripts, preset.ScriptFileName);
+    }
+
+    /// <summary>The user's parameters when they typed any, otherwise the preset's.</summary>
+    public static string ResolveScriptParameters(
+        InstallationScriptPreset preset,
+        InstallationSettings installation)
+    {
+        ArgumentNullException.ThrowIfNull(preset);
+        ArgumentNullException.ThrowIfNull(installation);
+
+        return string.IsNullOrWhiteSpace(installation.ScriptParameters)
+            ? preset.DefaultParameters
+            : installation.ScriptParameters.Trim();
     }
 
     private static void AddValidation(ArgumentList args, ValidationSettings validation)

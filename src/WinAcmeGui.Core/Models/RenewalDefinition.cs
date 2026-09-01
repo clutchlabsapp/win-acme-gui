@@ -13,4 +13,6 @@ public sealed class RenewalDefinition
     public ValidationSettings Validation { get; set; } = new();
 
     public StoreSettings Store { get; set; } = new();
+
+    public InstallationSettings Installation { get; set; } = new();
 }

@@ -38,6 +38,9 @@ public sealed class AppSettings
 
     public bool KeepExisting { get; set; }
 
+    /// <summary>Post-renewal hooks. Nothing in here is a credential.</summary>
+    public InstallationSettings Installation { get; set; } = new();
+
     public static string FilePath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "win-acme-gui",

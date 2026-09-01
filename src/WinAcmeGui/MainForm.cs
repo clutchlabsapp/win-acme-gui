@@ -16,14 +16,14 @@ public sealed class MainForm : Form
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly IWacsRunner _runner = new WacsRunner();
 
-    private readonly TextBox _wacsPath = Layout.Text();
-    private readonly TextBox _email = Layout.Text();
+    private readonly TextBox _wacsPath = Ui.Text();
+    private readonly TextBox _email = Ui.Text();
     private readonly CheckBox _acceptTos = new() { Text = "I accept the ACME terms of service", AutoSize = true };
     private readonly CheckBox _testServer = new() { Text = "Use the Let's Encrypt staging server (test certificates)", AutoSize = true };
 
-    private readonly TextBox _friendlyName = Layout.Text();
-    private readonly TextBox _commonName = Layout.Text();
-    private readonly TextBox _hostNames = Layout.Text(multiline: true, height: 90);
+    private readonly TextBox _friendlyName = Ui.Text();
+    private readonly TextBox _commonName = Ui.Text();
+    private readonly TextBox _hostNames = Ui.Text(multiline: true, height: 90);
 
     private readonly ComboBox _validationPlugin = new()
     {
@@ -35,13 +35,22 @@ public sealed class MainForm : Form
     private readonly ComboBox _storeName = new() { DropDownStyle = ComboBoxStyle.DropDown };
     private readonly CheckBox _keepExisting = new() { Text = "Keep the previous certificate when renewing", AutoSize = true };
 
-    private readonly TextBox _preview = Layout.ReadOnlyPane(70);
-    private readonly TextBox _log = Layout.ReadOnlyPane(180);
+    private readonly CheckBox _updateIis = new() { Text = "Rebind IIS https bindings to the new certificate", AutoSize = true };
+    private readonly TextBox _iisSiteId = Ui.Text();
+    private readonly TextBox _sslPort = Ui.Text();
+    private readonly TextBox _sslIpAddress = Ui.Text();
+
+    private readonly ComboBox _scriptPreset = new() { DropDownStyle = ComboBoxStyle.DropDownList };
+    private readonly TextBox _scriptPath = Ui.Text();
+    private readonly TextBox _scriptParameters = Ui.Text();
+
+    private readonly TextBox _preview = Ui.ReadOnlyPane(70);
+    private readonly TextBox _log = Ui.ReadOnlyPane(180);
     private readonly Label _problems = new()
     {
         AutoSize = true,
         ForeColor = Color.Firebrick,
-        Margin = new Padding(0, 0, 0, Layout.Gap),
+        Margin = new Padding(0, 0, 0, Ui.Gap),
     };
 
     private Button _createButton = null!;
@@ -49,8 +58,13 @@ public sealed class MainForm : Form
     private Button _renewButton = null!;
     private Button _cancelButton = null!;
 
+    private Button _browseScript = null!;
+
     private CancellationTokenSource? _running;
     private bool _loading = true;
+
+    /// <summary>Set while the code updates a control itself, to stop the change handlers recursing.</summary>
+    private bool _updatingUi;
 
     public MainForm()
     {
@@ -73,7 +87,7 @@ public sealed class MainForm : Form
             Dock = DockStyle.Fill,
             ColumnCount = 1,
             RowCount = 2,
-            Padding = new Padding(Layout.Gap),
+            Padding = new Padding(Ui.Gap),
         };
 
         root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
@@ -105,6 +119,7 @@ public sealed class MainForm : Form
             BuildCertificateGroup(),
             BuildValidationGroup(),
             BuildStoreGroup(),
+            BuildInstallationGroup(),
             BuildPreviewGroup(),
         })
         {
@@ -120,7 +135,7 @@ public sealed class MainForm : Form
 
     private GroupBox BuildWinAcmeGroup()
     {
-        var grid = Layout.Grid();
+        var grid = Ui.Grid();
 
         var pathRow = new TableLayoutPanel
         {
@@ -135,91 +150,138 @@ public sealed class MainForm : Form
         pathRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         _wacsPath.Dock = DockStyle.Fill;
         pathRow.Controls.Add(_wacsPath, 0, 0);
-        pathRow.Controls.Add(Layout.Button("Browse...", OnBrowse), 1, 0);
+        pathRow.Controls.Add(Ui.Button("Browse...", OnBrowse), 1, 0);
 
         _wacsPath.TextChanged += OnInputChanged;
 
-        Layout.AddRow(grid, "wacs.exe", pathRow, "The win-acme executable. Found automatically in the usual locations.");
+        Ui.AddRow(grid, "wacs.exe", pathRow, "The win-acme executable. Found automatically in the usual locations.");
 
-        return Layout.Group("win-acme", grid);
+        return Ui.Group("win-acme", grid);
     }
 
     private GroupBox BuildAccountGroup()
     {
-        var grid = Layout.Grid();
+        var grid = Ui.Grid();
 
         _email.TextChanged += OnInputChanged;
         _acceptTos.CheckedChanged += OnInputChanged;
         _testServer.CheckedChanged += OnInputChanged;
 
-        Layout.AddRow(grid, "Email address *", _email, "Let's Encrypt sends expiry warnings here.");
-        Layout.AddFullWidth(grid, _acceptTos);
-        Layout.AddFullWidth(
+        Ui.AddRow(grid, "Email address *", _email, "Let's Encrypt sends expiry warnings here.");
+        Ui.AddFullWidth(grid, _acceptTos);
+        Ui.AddFullWidth(
             grid,
             _testServer,
             "Staging certificates are not trusted by browsers, but staging is not rate limited. "
             + "Prove the setup here first.");
 
-        return Layout.Group("ACME account", grid);
+        return Ui.Group("ACME account", grid);
     }
 
     private GroupBox BuildCertificateGroup()
     {
-        var grid = Layout.Grid();
+        var grid = Ui.Grid();
 
         _friendlyName.TextChanged += OnInputChanged;
         _commonName.TextChanged += OnInputChanged;
         _hostNames.TextChanged += OnInputChanged;
 
-        Layout.AddRow(grid, "Host names *", _hostNames,
+        Ui.AddRow(grid, "Host names *", _hostNames,
             "One per line, or comma separated. Wildcards such as *.example.com are allowed.");
-        Layout.AddRow(grid, "Common name", _commonName,
+        Ui.AddRow(grid, "Common name", _commonName,
             "Optional. Must be one of the host names above; win-acme defaults to the first one.");
-        Layout.AddRow(grid, "Friendly name", _friendlyName,
+        Ui.AddRow(grid, "Friendly name", _friendlyName,
             "How this renewal is labelled in win-acme and in the certificate store.");
 
-        return Layout.Group("Certificate", grid);
+        return Ui.Group("Certificate", grid);
     }
 
     private GroupBox BuildValidationGroup()
     {
-        var grid = Layout.Grid();
+        var grid = Ui.Grid();
 
         _validationPlugin.Items.AddRange([.. PluginCatalog.ValidationPlugins.Select(p => (object)p.DisplayName)]);
         _validationPlugin.SelectedIndexChanged += OnValidationPluginChanged;
         _pluginFields.ValuesChanged += OnInputChanged;
 
-        Layout.AddRow(grid, "DNS provider", _validationPlugin,
+        Ui.AddRow(grid, "DNS provider", _validationPlugin,
             "DNS validation is used throughout: it works for wildcards and needs no inbound HTTP.");
-        Layout.AddFullWidth(grid, _pluginFields);
+        Ui.AddFullWidth(grid, _pluginFields);
 
-        return Layout.Group("Validation", grid);
+        return Ui.Group("Validation", grid);
     }
 
     private GroupBox BuildStoreGroup()
     {
-        var grid = Layout.Grid();
+        var grid = Ui.Grid();
 
         _storeName.Items.AddRange(["", "WebHosting", "My"]);
         _storeName.TextChanged += OnInputChanged;
         _keepExisting.CheckedChanged += OnInputChanged;
 
-        Layout.AddRow(grid, "Certificate store", _storeName,
+        Ui.AddRow(grid, "Certificate store", _storeName,
             "Blank uses win-acme's default (WebHosting). Choose My for the RDP import scripts, "
             + "which only look in LocalMachine\\My.");
-        Layout.AddFullWidth(grid, _keepExisting);
+        Ui.AddFullWidth(grid, _keepExisting);
 
-        return Layout.Group("Certificate store", grid);
+        return Ui.Group("Certificate store", grid);
+    }
+
+    private GroupBox BuildInstallationGroup()
+    {
+        var grid = Ui.Grid();
+
+        _updateIis.CheckedChanged += OnInputChanged;
+        _iisSiteId.TextChanged += OnInputChanged;
+        _sslPort.TextChanged += OnInputChanged;
+        _sslIpAddress.TextChanged += OnInputChanged;
+        _scriptPath.TextChanged += OnInputChanged;
+        _scriptParameters.TextChanged += OnInputChanged;
+
+        _scriptPreset.Items.AddRange([.. InstallationPresets.Scripts.Select(p => (object)p.DisplayName)]);
+        _scriptPreset.SelectedIndexChanged += OnScriptPresetChanged;
+
+        Ui.AddFullWidth(grid, _updateIis);
+        Ui.AddRow(grid, "IIS site ID", _iisSiteId, "Optional. Blank installs to the site the binding belongs to.");
+        Ui.AddRow(grid, "HTTPS port", _sslPort, "Optional. Blank means 443.");
+        Ui.AddRow(grid, "HTTPS IP address", _sslIpAddress, "Optional. Blank means all addresses.");
+
+        Ui.AddRow(grid, "Run after renewal", _scriptPreset,
+            "The Remote Desktop and Exchange scripts ship inside win-acme's own Scripts folder.");
+
+        var scriptRow = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            ColumnCount = 2,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = Padding.Empty,
+        };
+
+        scriptRow.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        scriptRow.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        _scriptPath.Dock = DockStyle.Fill;
+        _browseScript = Ui.Button("Browse...", OnBrowseScript);
+
+        scriptRow.Controls.Add(_scriptPath, 0, 0);
+        scriptRow.Controls.Add(_browseScript, 1, 0);
+
+        Ui.AddRow(grid, "Script", scriptRow);
+        Ui.AddRow(grid, "Parameters", _scriptParameters,
+            "Tokens: " + string.Join("  ", InstallationPresets.ParameterTokens));
+
+        return Ui.Group("After renewal", grid);
     }
 
     private GroupBox BuildPreviewGroup()
     {
-        var grid = Layout.Grid();
+        var grid = Ui.Grid();
 
-        Layout.AddFullWidth(grid, _preview);
-        Layout.AddHint(grid, "Credentials are hidden here. Use Copy command to put the real command line on the clipboard.");
+        Ui.AddFullWidth(grid, _preview);
+        Ui.AddHint(grid, "Credentials are hidden here. Use Copy command to put the real command line on the clipboard.");
 
-        return Layout.Group("Command that will run", grid);
+        return Ui.Group("Command that will run", grid);
     }
 
     private Control BuildActionArea()
@@ -236,10 +298,10 @@ public sealed class MainForm : Form
         area.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         area.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
-        _createButton = Layout.Button("Create renewal", OnCreateRenewal, isDefault: true);
-        _checkButton = Layout.Button("Check setup", OnCheckSetup);
-        _renewButton = Layout.Button("Renew now", OnRenewNow);
-        _cancelButton = Layout.Button("Stop", OnStop);
+        _createButton = Ui.Button("Create renewal", OnCreateRenewal, isDefault: true);
+        _checkButton = Ui.Button("Check setup", OnCheckSetup);
+        _renewButton = Ui.Button("Renew now", OnRenewNow);
+        _cancelButton = Ui.Button("Stop", OnStop);
         _cancelButton.Enabled = false;
 
         var buttons = new FlowLayoutPanel
@@ -248,7 +310,7 @@ public sealed class MainForm : Form
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
             WrapContents = false,
-            Margin = new Padding(0, 0, 0, Layout.Gap),
+            Margin = new Padding(0, 0, 0, Ui.Gap),
         };
 
         buttons.Controls.AddRange(
@@ -257,13 +319,13 @@ public sealed class MainForm : Form
             _checkButton,
             _renewButton,
             _cancelButton,
-            Layout.Button("Copy command", OnCopyCommand),
-            Layout.Button("Clear log", (_, _) => _log.Clear()),
+            Ui.Button("Copy command", OnCopyCommand),
+            Ui.Button("Clear log", (_, _) => _log.Clear()),
         ]);
 
         area.Controls.Add(_problems, 0, 0);
         area.Controls.Add(buttons, 0, 1);
-        area.Controls.Add(Layout.GroupFill("Output", _log), 0, 2);
+        area.Controls.Add(Ui.GroupFill("Output", _log), 0, 2);
 
         return area;
     }
@@ -277,6 +339,11 @@ public sealed class MainForm : Form
 
     private ValidationPlugin? SelectedPlugin => PluginAt(_validationPlugin.SelectedIndex);
 
+    private InstallationScriptPreset SelectedScriptPreset =>
+        _scriptPreset.SelectedIndex >= 0 && _scriptPreset.SelectedIndex < InstallationPresets.Scripts.Count
+            ? InstallationPresets.Scripts[_scriptPreset.SelectedIndex]
+            : InstallationPresets.None;
+
     private void ApplySettings()
     {
         _wacsPath.Text = WacsLocator.Locate(_settings.WacsPath) ?? _settings.WacsPath;
@@ -288,6 +355,31 @@ public sealed class MainForm : Form
         _hostNames.Text = string.Join(Environment.NewLine, _settings.HostNames);
         _storeName.Text = _settings.CertificateStoreName;
         _keepExisting.Checked = _settings.KeepExisting;
+
+        _updateIis.Checked = _settings.Installation.UpdateIisBindings;
+        _iisSiteId.Text = _settings.Installation.IisSiteId;
+        _sslPort.Text = _settings.Installation.SslPort;
+        _sslIpAddress.Text = _settings.Installation.SslIpAddress;
+
+        var presetIndex = InstallationPresets.Scripts
+            .ToList()
+            .FindIndex(p => string.Equals(p.Id, _settings.Installation.ScriptPresetId, StringComparison.OrdinalIgnoreCase));
+
+        // Selecting a preset resets the parameters to that preset's defaults, so the
+        // remembered values have to go in afterwards, not before.
+        _scriptPreset.SelectedIndex = presetIndex >= 0 ? presetIndex : 0;
+
+        if (_settings.Installation.ScriptParameters.Length > 0)
+        {
+            _scriptParameters.Text = _settings.Installation.ScriptParameters;
+        }
+
+        if (_settings.Installation.ScriptPath.Length > 0)
+        {
+            _scriptPath.Text = _settings.Installation.ScriptPath;
+        }
+
+        UpdateScriptControls();
 
         var index = PluginCatalog.ValidationPlugins
             .ToList()
@@ -316,6 +408,7 @@ public sealed class MainForm : Form
         _settings.HostNames = definition.Certificate.HostNames;
         _settings.CertificateStoreName = definition.Store.StoreName;
         _settings.KeepExisting = definition.Store.KeepExisting;
+        _settings.Installation = definition.Installation;
         _settings.RememberValidationValues(definition.Validation);
 
         _settings.Save();
@@ -342,6 +435,16 @@ public sealed class MainForm : Form
                 StoreName = _storeName.Text.Trim(),
                 KeepExisting = _keepExisting.Checked,
             },
+            Installation = new InstallationSettings
+            {
+                UpdateIisBindings = _updateIis.Checked,
+                IisSiteId = _iisSiteId.Text.Trim(),
+                SslPort = _sslPort.Text.Trim(),
+                SslIpAddress = _sslIpAddress.Text.Trim(),
+                ScriptPresetId = SelectedScriptPreset.Id,
+                ScriptPath = _scriptPath.Text.Trim(),
+                ScriptParameters = _scriptParameters.Text.Trim(),
+            },
         };
 
         _pluginFields.ApplyTo(definition.Validation);
@@ -364,9 +467,65 @@ public sealed class MainForm : Form
         RefreshPreview();
     }
 
+    private void OnScriptPresetChanged(object? sender, EventArgs e)
+    {
+        var preset = SelectedScriptPreset;
+
+        _updatingUi = true;
+        try
+        {
+            _scriptParameters.Text = preset.DefaultParameters;
+
+            if (!preset.IsCustom)
+            {
+                _scriptPath.Text = string.Empty;
+            }
+
+            // These scripts only search LocalMachine\My, so a blank store — which means
+            // WebHosting — would leave them finding nothing. Filling in a blank field is
+            // a help; overwriting a deliberate choice is not, so only do the former.
+            if (preset.RequiredStoreName.Length > 0 && _storeName.Text.Trim().Length == 0)
+            {
+                _storeName.Text = preset.RequiredStoreName;
+            }
+        }
+        finally
+        {
+            _updatingUi = false;
+        }
+
+        UpdateScriptControls();
+        RefreshPreview();
+    }
+
+    private void UpdateScriptControls()
+    {
+        var preset = SelectedScriptPreset;
+
+        _scriptPath.Enabled = !preset.IsNone;
+        _scriptPath.ReadOnly = !preset.IsCustom;
+        _browseScript.Enabled = preset.IsCustom;
+        _scriptParameters.Enabled = !preset.IsNone;
+    }
+
+    private void OnBrowseScript(object? sender, EventArgs e)
+    {
+        using var dialog = new OpenFileDialog
+        {
+            Title = "Choose the script to run after renewal",
+            Filter = "Scripts and programs (*.ps1;*.bat;*.cmd;*.exe)|*.ps1;*.bat;*.cmd;*.exe|All files (*.*)|*.*",
+            CheckFileExists = true,
+        };
+
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            _scriptPath.Text = dialog.FileName;
+        }
+    }
+
     private void RefreshPreview()
     {
-        if (_loading)
+        if (_loading || _updatingUi)
         {
             return;
         }
@@ -380,6 +539,8 @@ public sealed class MainForm : Form
             problems.Insert(0, "Point the tool at wacs.exe.");
         }
 
+        problems.AddRange(ShowResolvedScriptPath(definition));
+
         _problems.Text = problems.Count == 0
             ? string.Empty
             : string.Join(Environment.NewLine, problems.Select(p => "• " + p));
@@ -392,6 +553,33 @@ public sealed class MainForm : Form
         _createButton.Enabled = idle && problems.Count == 0;
         _checkButton.Enabled = idle;
         _renewButton.Enabled = idle && wacsPath.Length > 0;
+    }
+
+    /// <summary>
+    /// Bundled presets live next to wacs.exe, so their path is derived rather than
+    /// typed. Shows it in the read-only box and reports it if the file is not there —
+    /// a missing script only fails at the very end of a renewal otherwise.
+    /// </summary>
+    private IEnumerable<string> ShowResolvedScriptPath(RenewalDefinition definition)
+    {
+        var preset = SelectedScriptPreset;
+        if (preset.IsNone)
+        {
+            return Array.Empty<string>();
+        }
+
+        var resolved = WacsArgumentBuilder.ResolveScriptPath(WacsPathOrDefault(), preset, definition.Installation);
+
+        if (!preset.IsCustom && _scriptPath.Text != resolved)
+        {
+            _updatingUi = true;
+            _scriptPath.Text = resolved;
+            _updatingUi = false;
+        }
+
+        return resolved.Length > 0 && !File.Exists(resolved)
+            ? new[] { $"Script not found: {resolved}" }
+            : Array.Empty<string>();
     }
 
     // ---------------------------------------------------------------- actions

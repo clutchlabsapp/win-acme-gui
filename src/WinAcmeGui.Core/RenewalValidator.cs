@@ -18,6 +18,7 @@ public static class RenewalValidator
         ValidateCertificate(definition.Certificate, problems);
         ValidateAccount(definition.Account, problems);
         ValidateValidation(definition.Validation, problems);
+        ValidateInstallation(definition.Installation, definition.Store, problems);
 
         return problems;
     }
@@ -84,6 +85,58 @@ public static class RenewalValidator
         if (plugin.ExtraValidation is not null)
         {
             problems.AddRange(plugin.ExtraValidation(new ValuesLookup(validation.Values)));
+        }
+    }
+
+    private static void ValidateInstallation(
+        InstallationSettings installation,
+        StoreSettings store,
+        List<string> problems)
+    {
+        var preset = InstallationPresets.Find(installation.ScriptPresetId);
+        if (preset is null)
+        {
+            problems.Add("Choose a post-renewal script, or 'No script'.");
+            return;
+        }
+
+        if (preset.IsCustom && string.IsNullOrWhiteSpace(installation.ScriptPath))
+        {
+            problems.Add("Choose the script to run after renewal, or select 'No script'.");
+        }
+
+        // The RD and Exchange scripts read LocalMachine\My. Leaving the certificate in
+        // WebHosting makes them fail silently, which is the worst possible outcome for
+        // something that only runs once every 60 days.
+        if (preset.RequiredStoreName.Length > 0
+            && !string.Equals(store.StoreName.Trim(), preset.RequiredStoreName, StringComparison.OrdinalIgnoreCase))
+        {
+            problems.Add($"{preset.DisplayName} reads certificates from LocalMachine\\{preset.RequiredStoreName}. "
+                         + $"Set the certificate store to '{preset.RequiredStoreName}'.");
+        }
+
+        if (installation.UpdateIisBindings)
+        {
+            ValidateOptionalNumber(installation.IisSiteId, "IIS site ID", problems);
+            ValidateOptionalNumber(installation.SslPort, "HTTPS port", problems);
+        }
+    }
+
+    private static void ValidateOptionalNumber(string value, string label, List<string> problems)
+    {
+        var trimmed = value.Trim();
+        if (trimmed.Length == 0)
+        {
+            return;
+        }
+
+        if (!int.TryParse(trimmed, out var parsed))
+        {
+            problems.Add($"{label} must be a number.");
+        }
+        else if (parsed <= 0)
+        {
+            problems.Add($"{label} must be greater than zero.");
         }
     }
 
