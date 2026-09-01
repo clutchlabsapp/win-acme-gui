@@ -1,8 +1,6 @@
 package ui
 
 import (
-	"strings"
-
 	"github.com/lxn/walk"
 
 	"github.com/clutchlabsapp/win-acme-gui/internal/model"
@@ -35,7 +33,7 @@ func (m *RenewalTableModel) Value(row, col int) interface{} {
 	case 0:
 		return item.FriendlyName
 	case 1:
-		return strings.Join(item.Hosts, ", ")
+		return item.HostsDisplay()
 	case 2:
 		return item.StatusText()
 	case 3:

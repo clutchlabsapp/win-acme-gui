@@ -49,26 +49,51 @@ func (l *LogsTab) TabPageDef() TabPage {
 	}
 }
 
-// Append adds timestamped text to the log viewer.
-// Safe to call from the UI thread (callers must use Synchronize from goroutines).
+// maxLogChars bounds the log buffer. wacs.exe can emit a lot of output in
+// verbose mode, and an unbounded TextEdit degrades the whole UI.
+const maxLogChars = 512 * 1024
+
+// Append adds timestamped text to the log viewer, one entry per input line.
+// Must be called on the UI thread; background goroutines go through
+// App.appendLog, which marshals via Synchronize.
 func (l *LogsTab) Append(text string) {
 	if l.teLog == nil || text == "" {
 		return
 	}
+
+	// Build the whole block first: appending per line would re-copy the
+	// existing buffer each time, which is quadratic in the log size.
 	timestamp := time.Now().Format("15:04:05")
+	var b strings.Builder
 	for _, line := range strings.Split(text, "\n") {
-		line = strings.TrimRight(line, "\r")
-		if line == "" {
+		if line = strings.TrimRight(line, "\r"); line == "" {
 			continue
 		}
-		current := l.teLog.Text()
-		entry := "[" + timestamp + "] " + line + "\r\n"
-		newText := current + entry
-		l.teLog.SetText(newText)
+		b.WriteString("[")
+		b.WriteString(timestamp)
+		b.WriteString("] ")
+		b.WriteString(line)
+		b.WriteString("\r\n")
 	}
-	// Scroll to bottom
-	textLen := len(l.teLog.Text())
-	l.teLog.SetTextSelection(textLen, textLen)
+	if b.Len() == 0 {
+		return
+	}
+
+	if l.teLog.TextLength()+b.Len() > maxLogChars {
+		l.trim()
+	}
+	l.teLog.AppendText(b.String())
+}
+
+// trim drops the oldest half of the buffer, keeping the log bounded while
+// preserving recent context. It cuts on a line boundary so entries stay intact.
+func (l *LogsTab) trim() {
+	text := l.teLog.Text()
+	cut := len(text) / 2
+	if idx := strings.IndexByte(text[cut:], '\n'); idx >= 0 {
+		cut += idx + 1
+	}
+	l.teLog.SetText("[log truncated]\r\n" + text[cut:])
 }
 
 func (l *LogsTab) onClearClicked() {
@@ -82,7 +107,11 @@ func (l *LogsTab) onCopyClicked() {
 		return
 	}
 	text := l.teLog.Text()
-	if text != "" {
-		walk.Clipboard().SetText(text)
+	if text == "" {
+		return
+	}
+	if err := walk.Clipboard().SetText(text); err != nil {
+		ShowError(l.teLog.Form(), "Copy Failed",
+			"Could not write the log to the clipboard:\n"+err.Error())
 	}
 }

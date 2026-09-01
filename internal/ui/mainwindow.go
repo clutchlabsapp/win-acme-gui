@@ -25,5 +25,5 @@ func ShowInfo(owner walk.Form, title, message string) {
 // Returns true if the user clicks Yes.
 func ConfirmAction(owner walk.Form, title, message string) bool {
 	return walk.MsgBox(owner, title, message,
-		walk.MsgBoxYesNo|walk.MsgBoxIconQuestion) == 6 // IDYES
+		walk.MsgBoxYesNo|walk.MsgBoxIconQuestion) == walk.DlgCmdYes
 }

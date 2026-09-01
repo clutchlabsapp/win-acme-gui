@@ -13,6 +13,7 @@ import (
 // SettingsTab manages the settings tab.
 type SettingsTab struct {
 	setStatus StatusFunc
+	onSaved   RefreshFunc
 	wacsPath  string
 
 	// ACME Provider
@@ -39,10 +40,12 @@ type SettingsTab struct {
 	chkVerbose  *walk.CheckBox
 }
 
-// NewSettingsTab creates a new SettingsTab.
-func NewSettingsTab(setStatus StatusFunc, wacsPath string) *SettingsTab {
+// NewSettingsTab creates a new SettingsTab. onSaved is invoked after a
+// successful save so other tabs can pick up the new values.
+func NewSettingsTab(setStatus StatusFunc, wacsPath string, onSaved RefreshFunc) *SettingsTab {
 	return &SettingsTab{
 		setStatus: setStatus,
+		onSaved:   onSaved,
 		wacsPath:  wacsPath,
 	}
 }
@@ -186,6 +189,10 @@ func (s *SettingsTab) onSaveClicked() {
 			"Failed to save settings:\n"+err.Error())
 		s.setStatus("Error saving settings")
 		return
+	}
+
+	if s.onSaved != nil {
+		s.onSaved()
 	}
 
 	ShowInfo(s.leBaseURI.Form(), "Settings Saved",
