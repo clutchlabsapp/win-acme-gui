@@ -1,10 +1,17 @@
+// Command win-acme-gui is a native Windows front-end for the win-acme ACME
+// client. It bundles win-acme itself, so the only thing a user needs to deploy
+// is this single executable.
 package main
 
 import (
 	"log"
 	"os"
+	"path/filepath"
+
+	"github.com/lxn/walk"
 
 	"github.com/clutchlabsapp/win-acme-gui/internal/app"
+	"github.com/clutchlabsapp/win-acme-gui/internal/config"
 	"github.com/clutchlabsapp/win-acme-gui/internal/extractor"
 	"github.com/clutchlabsapp/win-acme-gui/internal/service"
 )
@@ -13,32 +20,53 @@ import (
 var version = "dev"
 
 func main() {
-	// Set up logging to a file alongside the executable for debugging
-	logFile, err := os.OpenFile("win-acme-gui.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err == nil {
-		log.SetOutput(logFile)
-		defer logFile.Close()
-	}
+	closeLog := setupLogging()
+	defer closeLog()
 
 	log.Printf("win-acme-gui %s starting", version)
 
-	// Extract embedded win-acme binary
+	// Unpack the bundled win-acme before building any UI: without it there is
+	// nothing for the GUI to drive.
 	wacsPath, err := extractor.EnsureExtracted()
 	if err != nil {
-		log.Fatalf("Failed to extract win-acme: %v", err)
+		fatal("Startup Failed", "Could not prepare win-acme:\n\n"+err.Error())
 	}
-	log.Printf("win-acme extracted to: %s", wacsPath)
+	log.Printf("win-acme ready at %s", wacsPath)
 
-	// Create service layer
-	svc := service.NewWacsService(wacsPath)
-
-	// Create and run the application
-	application := app.New(svc)
-
-	// Trigger initial data load after a short delay to let the window render
-	go application.RefreshAll()
-
+	application := app.New(service.NewWacsService(wacsPath))
 	if err := application.Run(); err != nil {
-		log.Fatalf("Application error: %v", err)
+		fatal("Application Error", "The application failed to start:\n\n"+err.Error())
 	}
+}
+
+// setupLogging directs the log package to a file in the app config directory.
+// The working directory is not a reliable place to write: a GUI app can be
+// launched from anywhere, including directories the user cannot write to.
+// Returns a function that closes the log file.
+func setupLogging() func() {
+	dir, err := config.ConfigDir()
+	if err != nil {
+		return func() {}
+	}
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return func() {}
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "win-acme-gui.log"),
+		os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		return func() {}
+	}
+	log.SetOutput(f)
+	return func() { f.Close() }
+}
+
+// fatal reports an unrecoverable startup error and exits.
+//
+// The binary is linked with -H windowsgui and so has no console: writing to
+// stderr would make the failure invisible and the app would appear to do
+// nothing at all. A message box is the only way the user sees the reason.
+func fatal(title, message string) {
+	log.Printf("FATAL: %s: %s", title, message)
+	walk.MsgBox(nil, title, message, walk.MsgBoxIconError)
+	os.Exit(1)
 }

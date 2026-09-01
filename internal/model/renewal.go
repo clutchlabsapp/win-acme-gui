@@ -1,15 +1,18 @@
 package model
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // RenewalStatus represents the current state of a certificate renewal.
 type RenewalStatus int
 
 const (
-	RenewalStatusOK       RenewalStatus = iota // Certificate is valid and not due
-	RenewalStatusDueSoon                       // Certificate will expire within renewal window
-	RenewalStatusExpired                       // Certificate has expired
-	RenewalStatusError                         // Last renewal attempt failed
+	RenewalStatusOK      RenewalStatus = iota // Certificate is valid and not due
+	RenewalStatusDueSoon                      // Certificate will expire within renewal window
+	RenewalStatusExpired                      // Certificate has expired
+	RenewalStatusError                        // Last renewal attempt failed
 )
 
 // Renewal represents a managed certificate renewal as reported by wacs.exe
@@ -43,14 +46,7 @@ func (r *Renewal) StatusText() string {
 	}
 }
 
-// HostsDisplay returns a comma-separated list of hosts.
+// HostsDisplay returns the hosts as a single comma-separated string.
 func (r *Renewal) HostsDisplay() string {
-	result := ""
-	for i, h := range r.Hosts {
-		if i > 0 {
-			result += ", "
-		}
-		result += h
-	}
-	return result
+	return strings.Join(r.Hosts, ", ")
 }

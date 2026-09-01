@@ -82,6 +82,12 @@ type CertificateRequest struct {
 	IISInstallSiteID int
 	ScriptPath       string
 
+	// Account. win-acme must be able to register with the ACME server without
+	// prompting; unattended runs need both the contact address and explicit
+	// agreement to the terms of service, or the run stops waiting for input.
+	EmailAddress string
+	AcceptTOS    bool
+
 	// Flags
 	Test    bool
 	Force   bool
@@ -94,6 +100,11 @@ func HTTPValidationMethods() []string {
 }
 
 // DNSValidationMethods returns the validation methods available for DNS-01.
+//
+// cloudflare, route53 and azure are separate plugin archives that must be
+// bundled at build time; this list is kept in sync with WACS_PLUGINS in the
+// Makefile. acme-dns is compiled into win-acme itself and needs no plugin.
+// "manual" pauses for the user to create the TXT record by hand.
 func DNSValidationMethods() []string {
 	return []string{"acme-dns", "cloudflare", "route53", "azure", "manual"}
 }
