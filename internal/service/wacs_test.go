@@ -37,6 +37,8 @@ func TestBuildCreateArgs_ManualHTTP(t *testing.T) {
 	assertContains(t, args, "--notaskscheduler")
 }
 
+// The IIS site id differs by role: --siteid selects the source bindings,
+// --installationsiteid the installation target.
 func TestBuildCreateArgs_IISDNSCloudflare(t *testing.T) {
 	req := model.CertificateRequest{
 		Source:           model.SourceIIS,
@@ -88,6 +90,21 @@ func TestBuildCreateArgs_Route53(t *testing.T) {
 	assertContainsArg(t, args, "--script", "C:\\scripts\\deploy.ps1")
 }
 
+// acme-dns is compiled into win-acme rather than shipped as a plugin.
+func TestBuildCreateArgs_AcmeDNS(t *testing.T) {
+	req := model.CertificateRequest{
+		Source:           model.SourceManual,
+		Hosts:            []string{"example.com"},
+		ValidationMode:   model.ValidationModeDNS01,
+		ValidationMethod: model.ValAcmeDNS,
+		AcmeDNSServer:    "https://auth.acme-dns.io",
+	}
+
+	args := BuildCreateArgs(req)
+	assertContainsArg(t, args, "--validation", "acme-dns")
+	assertContainsArg(t, args, "--acmednsserver", "https://auth.acme-dns.io")
+}
+
 func TestBuildCreateArgs_MinimalDefaults(t *testing.T) {
 	req := model.CertificateRequest{
 		Source: model.SourceManual,
@@ -106,19 +123,30 @@ func TestBuildCreateArgs_MinimalDefaults(t *testing.T) {
 	assertNotContains(t, args, "--verbose")
 }
 
-func TestBuildCreateArgs_AcmeDNS(t *testing.T) {
+// Unattended runs block on the terms-of-service prompt unless the contact
+// address and --accepttos are both supplied, so these must survive arg building.
+func TestBuildCreateArgs_AccountRegistration(t *testing.T) {
 	req := model.CertificateRequest{
-		Source:           model.SourceManual,
-		Hosts:            []string{"example.com"},
-		ValidationMode:   model.ValidationModeDNS01,
-		ValidationMethod: model.ValAcmeDNS,
-		AcmeDNSServer:    "https://auth.acme-dns.io",
-		Store:            model.StoreCertificateStore,
-		Installation:     model.InstallationNone,
+		Source:       model.SourceManual,
+		Hosts:        []string{"example.com"},
+		EmailAddress: "admin@example.com",
+		AcceptTOS:    true,
 	}
 
 	args := BuildCreateArgs(req)
-	assertContainsArg(t, args, "--acmednsserver", "https://auth.acme-dns.io")
+	assertContainsArg(t, args, "--emailaddress", "admin@example.com")
+	assertContains(t, args, "--accepttos")
+}
+
+func TestBuildCreateArgs_OmitsAccountFlagsWhenUnset(t *testing.T) {
+	req := model.CertificateRequest{
+		Source: model.SourceManual,
+		Hosts:  []string{"example.com"},
+	}
+
+	args := BuildCreateArgs(req)
+	assertNotContains(t, args, "--emailaddress")
+	assertNotContains(t, args, "--accepttos")
 }
 
 // assertContainsArg checks that args contains --flag followed by value.
