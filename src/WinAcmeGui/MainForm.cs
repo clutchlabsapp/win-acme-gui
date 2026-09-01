@@ -1,5 +1,3 @@
-using WinAcmeGui.Core.Models;
-
 namespace WinAcmeGui;
 
 /// <summary>
@@ -9,7 +7,7 @@ public sealed class MainForm : Form
 {
     public MainForm()
     {
-        Text = BuildInfo.ProductName;
+        Text = "win-acme GUI";
         Width = 900;
         Height = 700;
         StartPosition = FormStartPosition.CenterScreen;
