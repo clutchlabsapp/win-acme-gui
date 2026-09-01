@@ -2,12 +2,14 @@ package ui
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
 
+	"github.com/clutchlabsapp/win-acme-gui/internal/config"
 	"github.com/clutchlabsapp/win-acme-gui/internal/model"
 	"github.com/clutchlabsapp/win-acme-gui/internal/service"
 )
@@ -30,11 +32,11 @@ type NewCertTab struct {
 	cbValMethod *walk.ComboBox
 
 	// DNS credential widgets
-	grpDNSCreds      *walk.GroupBox
+	grpDNSCreds       *walk.GroupBox
 	leCloudflareToken *walk.LineEdit
-	leAWSAccessKey   *walk.LineEdit
-	leAWSSecretKey   *walk.LineEdit
-	leAcmeDNSServer  *walk.LineEdit
+	leAWSAccessKey    *walk.LineEdit
+	leAWSSecretKey    *walk.LineEdit
+	leAcmeDNSServer   *walk.LineEdit
 
 	// Store widgets
 	cbStore   *walk.ComboBox
@@ -46,6 +48,10 @@ type NewCertTab struct {
 	cbInstall       *walk.ComboBox
 	leInstallSiteID *walk.LineEdit
 	leScriptPath    *walk.LineEdit
+
+	// Account
+	lblEmail     *walk.Label
+	chkAcceptTOS *walk.CheckBox
 
 	// Options
 	chkTest    *walk.CheckBox
@@ -68,6 +74,8 @@ func NewNewCertTab(svc service.WacsService, setStatus StatusFunc, appendLog LogF
 
 // TabPageDef returns the declarative definition for the New Certificate tab.
 func (n *NewCertTab) TabPageDef() TabPage {
+	defaults := config.Load()
+
 	return TabPage{
 		Title:  "New Certificate",
 		Layout: VBox{},
@@ -123,9 +131,9 @@ func (n *NewCertTab) TabPageDef() TabPage {
 							},
 							Label{Text: "Validation Method:"},
 							ComboBox{
-								AssignTo:     &n.cbValMethod,
-								Model:        model.HTTPValidationMethods(),
-								CurrentIndex: 0,
+								AssignTo:              &n.cbValMethod,
+								Model:                 model.HTTPValidationMethods(),
+								CurrentIndex:          0,
 								OnCurrentIndexChanged: n.onValMethodChanged,
 							},
 						},
@@ -222,6 +230,24 @@ func (n *NewCertTab) TabPageDef() TabPage {
 						},
 					},
 
+					// Account
+					GroupBox{
+						Title:  "Account",
+						Layout: Grid{Columns: 2},
+						Children: []Widget{
+							Label{Text: "Contact Email:"},
+							Label{
+								AssignTo: &n.lblEmail,
+								Text:     "(not set - configure in Settings)",
+							},
+							Label{Text: "Terms of Service:"},
+							CheckBox{
+								AssignTo: &n.chkAcceptTOS,
+								Text:     "I accept the ACME provider's terms of service",
+							},
+						},
+					},
+
 					// Options
 					GroupBox{
 						Title:  "Options",
@@ -230,11 +256,12 @@ func (n *NewCertTab) TabPageDef() TabPage {
 							CheckBox{
 								AssignTo: &n.chkTest,
 								Text:     "Use Staging (Test Mode)",
-								Checked:  true,
+								Checked:  defaults.UseTestMode,
 							},
 							CheckBox{
 								AssignTo: &n.chkVerbose,
 								Text:     "Verbose Output",
+								Checked:  defaults.VerboseMode,
 							},
 						},
 					},
@@ -243,7 +270,7 @@ func (n *NewCertTab) TabPageDef() TabPage {
 
 			// Bottom bar
 			Composite{
-				Layout:  HBox{},
+				Layout: HBox{},
 				Children: []Widget{
 					ProgressBar{
 						AssignTo:    &n.pbCreate,
@@ -261,6 +288,19 @@ func (n *NewCertTab) TabPageDef() TabPage {
 				},
 			},
 		},
+	}
+}
+
+// ReloadSettings refreshes the settings-derived parts of the form. Called when
+// the Settings tab saves, so the account email shown here cannot go stale.
+func (n *NewCertTab) ReloadSettings() {
+	if n.lblEmail == nil {
+		return
+	}
+	if email := config.Load().AccountEmail; email != "" {
+		n.lblEmail.SetText(email)
+	} else {
+		n.lblEmail.SetText("(not set - configure in Settings)")
 	}
 }
 
@@ -307,17 +347,16 @@ func (n *NewCertTab) onInstallChanged() {
 }
 
 func (n *NewCertTab) onCreateClicked() {
-	// Validate required fields
-	source := n.cbSource.Text()
-	hosts := strings.TrimSpace(n.leHosts.Text())
+	// Settings are read at click time, not tab-build time, so a change made in
+	// the Settings tab during this session takes effect without a restart.
+	settings := config.Load()
 
-	if source == "manual" && hosts == "" {
-		ShowError(n.btnCreate.Form(), "Validation Error",
-			"Please enter at least one hostname.")
+	if msg := n.validate(settings.AccountEmail); msg != "" {
+		ShowError(n.btnCreate.Form(), "Validation Error", msg)
 		return
 	}
 
-	req := n.buildRequest()
+	req := n.buildRequest(settings.AccountEmail)
 
 	// Disable button, show progress
 	n.btnCreate.SetEnabled(false)
@@ -355,10 +394,35 @@ func (n *NewCertTab) onCreateClicked() {
 	}()
 }
 
-func (n *NewCertTab) buildRequest() model.CertificateRequest {
+// validate reports the first problem preventing certificate creation, or ""
+// when the form is ready to submit. Catching these here keeps the user from
+// waiting on a wacs.exe run that was always going to fail.
+func (n *NewCertTab) validate(email string) string {
+	if n.cbSource.Text() == string(model.SourceManual) &&
+		strings.TrimSpace(n.leHosts.Text()) == "" {
+		return "Enter at least one hostname."
+	}
+	if n.cbSource.Text() == string(model.SourceIIS) {
+		if _, ok := parseIntField(n.leIISSiteID.Text()); !ok {
+			return "Enter the IIS site ID to read bindings from."
+		}
+	}
+	if email == "" {
+		return "Set an account email address on the Settings tab first.\n\n" +
+			"The ACME provider requires a contact address to register an account."
+	}
+	if !n.chkAcceptTOS.Checked() {
+		return "You must accept the ACME provider's terms of service to continue."
+	}
+	return ""
+}
+
+func (n *NewCertTab) buildRequest(email string) model.CertificateRequest {
 	req := model.CertificateRequest{
 		Source:       model.SourceType(n.cbSource.Text()),
 		FriendlyName: n.leFriendlyName.Text(),
+		EmailAddress: email,
+		AcceptTOS:    n.chkAcceptTOS.Checked(),
 		Test:         n.chkTest.Checked(),
 		Verbose:      n.chkVerbose.Checked(),
 	}
@@ -416,17 +480,12 @@ func (n *NewCertTab) buildRequest() model.CertificateRequest {
 	return req
 }
 
+// parseIntField parses a numeric text field, reporting whether it held a
+// usable positive value. Blank and malformed input are both treated as unset.
 func parseIntField(s string) (int, bool) {
-	s = strings.TrimSpace(s)
-	if s == "" {
+	n, err := strconv.Atoi(strings.TrimSpace(s))
+	if err != nil || n <= 0 {
 		return 0, false
-	}
-	var n int
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0, false
-		}
-		n = n*10 + int(c-'0')
 	}
 	return n, true
 }
