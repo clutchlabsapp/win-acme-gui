@@ -1,0 +1,11 @@
+<Project>
+  <PropertyGroup>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <Product>win-acme GUI</Product>
+    <Company>clutchlabs</Company>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+</Project>
