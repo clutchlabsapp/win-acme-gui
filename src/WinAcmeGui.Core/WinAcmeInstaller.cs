@@ -2,6 +2,7 @@ using System.IO.Compression;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Runtime.InteropServices;
+using WinAcmeGui.Core.Plugins;
 
 namespace WinAcmeGui.Core;
 
@@ -87,6 +88,11 @@ public sealed class WinAcmeInstaller(HttpClient? httpClient = null)
 
         foreach (var pluginId in dnsPluginIds.Distinct(StringComparer.OrdinalIgnoreCase))
         {
+            if (PluginCatalog.Find(pluginId) is { RequiresSeparateDownload: false })
+            {
+                continue;
+            }
+
             var plugin = release.DnsPlugin(pluginId);
 
             if (plugin is null)

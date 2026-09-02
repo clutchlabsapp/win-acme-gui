@@ -48,8 +48,30 @@ inbound HTTP to your server. Supported providers:
 | Amazon Route 53 | `route53` | The instance IAM role, or an access key ID and secret |
 | Azure DNS | `azure` | Subscription and resource group, plus a managed identity or an app registration |
 
-There is no built-in Namecheap plugin in win-acme. If your domains are there, either
-delegate `_acme-challenge` with a CNAME to a provider above, or use a custom script.
+| Namecheap | `script` + helper | [Fynydd.NameCheap](https://github.com/fynydd/Fynydd.NameCheap), plus your Namecheap API credentials |
+
+Namecheap has no win-acme plugin. It is driven instead through win-acme's built-in
+`script` plugin and the Fynydd.NameCheap helper, which you build yourself:
+
+```
+git clone https://github.com/fynydd/Fynydd.NameCheap
+dotnet publish NameCheap/NameCheap.csproj -o publish -p:PublishSingleFile=true -c Release -r win-x64 --self-contained
+```
+
+Three things its readme does not tell you, all of which this tool handles or warns about:
+
+- The file is **`NameCheap.exe`**, not `Fynydd.NameCheap.exe`.
+- Its credentials go in an `appsettings.json` beside it, never on a command line — so
+  your Namecheap API key is never visible in a running process's arguments. Fill the
+  fields in the GUI and press **Save credentials** to write that file.
+- It reads that file from the **working directory**, not from its own folder, and
+  win-acme does not set one when running a script. **Put it in the win-acme folder**
+  or it will fail before reaching the API. The tool warns you if it is elsewhere.
+
+The helper is GPLv3 and is not bundled here; you build and run your own copy.
+
+Unlike the three plugins above, this needs no separate win-acme download and works on
+the `trimmed` build, because `script` is built into win-acme.
 
 **These three are separate win-acme downloads.** Each ships as its own `.zip` that has to
 be unpacked next to `wacs.exe`, and none of them load into win-acme's smaller `trimmed`
