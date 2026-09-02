@@ -1,0 +1,47 @@
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      # Self-contained so there is no .NET runtime to install on the target machine,
+      # and not trimmed: WinForms resolves controls by reflection and trimming breaks it.
+      - name: Publish
+        run: >
+          dotnet publish src/WinAcmeGui/WinAcmeGui.csproj
+          -c Release
+          -r win-x64
+          --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:PublishTrimmed=false
+          -o publish
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: win-acme-gui
+          path: publish/win-acme-gui.exe
+          if-no-files-found: error
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        run: gh release create "${{ github.ref_name }}" publish/win-acme-gui.exe --generate-notes
+        env:
+          GH_TOKEN: ${{ github.token }}
