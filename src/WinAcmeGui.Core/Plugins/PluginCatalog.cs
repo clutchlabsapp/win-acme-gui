@@ -15,6 +15,7 @@ public static class PluginCatalog
         new ValidationPlugin
         {
             Id = CloudflareId,
+            DetectionFlag = "cloudflareapitoken",
             DisplayName = "Cloudflare",
             Description = "Creates the _acme-challenge TXT record through the Cloudflare API.",
             Fields =
@@ -32,6 +33,7 @@ public static class PluginCatalog
         new ValidationPlugin
         {
             Id = Route53Id,
+            DetectionFlag = "route53iamrole",
             DisplayName = "Amazon Route 53",
             Description = "Creates the TXT record in Route 53. Use the instance IAM role where you can, "
                           + "and an access key pair otherwise.",
@@ -71,6 +73,7 @@ public static class PluginCatalog
         new ValidationPlugin
         {
             Id = AzureId,
+            DetectionFlag = "azuresubscriptionid",
             DisplayName = "Azure DNS",
             Description = "Creates the TXT record in an Azure DNS zone. Authenticate with a managed "
                           + "identity, or with an app registration's client id and secret.",

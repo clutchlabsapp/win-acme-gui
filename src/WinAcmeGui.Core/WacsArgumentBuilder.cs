@@ -70,6 +70,13 @@ public static class WacsArgumentBuilder
         new(wacsPath, [new WacsArgument("--version")]);
 
     /// <summary>
+    /// Lists every available argument. Loaded plugins contribute their own, so this
+    /// doubles as a way to see which validation plugins are actually installed.
+    /// </summary>
+    public static WacsCommand BuildHelp(string wacsPath) =>
+        new(wacsPath, [new WacsArgument("--help")]);
+
+    /// <summary>
     /// Runs a renewal now. Without <paramref name="force"/> win-acme skips
     /// certificates that are not due yet, which is what the scheduled task does.
     /// </summary>

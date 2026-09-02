@@ -1,6 +1,7 @@
 using System.Security.Principal;
 using WinAcmeGui.Core;
 using WinAcmeGui.Core.Models;
+using WinAcmeGui.Core.Plugins;
 
 namespace WinAcmeGui;
 
@@ -42,7 +43,15 @@ internal sealed class SetupChecker(IWacsRunner runner)
         }
     }
 
-    public async Task<SetupReport> RunAsync(string wacsPath, CancellationToken cancellationToken = default)
+    /// <param name="requiredPlugin">
+    /// The DNS plugin this renewal needs, so the report can say whether win-acme can
+    /// actually load it. All of them are separate downloads that only work on the
+    /// pluggable build.
+    /// </param>
+    public async Task<SetupReport> RunAsync(
+        string wacsPath,
+        ValidationPlugin? requiredPlugin = null,
+        CancellationToken cancellationToken = default)
     {
         var checks = new List<SetupCheck>();
 
@@ -59,7 +68,13 @@ internal sealed class SetupChecker(IWacsRunner runner)
         }
 
         checks.Add(new SetupCheck("win-acme found", SetupStatus.Pass, wacsPath));
-        checks.Add(await CheckVersionAsync(wacsPath, cancellationToken).ConfigureAwait(false));
+
+        var installation = await new WacsInspector(runner)
+            .InspectAsync(wacsPath, cancellationToken)
+            .ConfigureAwait(false);
+
+        checks.Add(CheckVersion(installation));
+        checks.AddRange(CheckPluginAvailability(installation, requiredPlugin));
         checks.Add(CheckElevation());
         checks.Add(await CheckScheduledTaskAsync(cancellationToken).ConfigureAwait(false));
 
@@ -70,25 +85,43 @@ internal sealed class SetupChecker(IWacsRunner runner)
         return new SetupReport(checks, renewals);
     }
 
-    private async Task<SetupCheck> CheckVersionAsync(string wacsPath, CancellationToken cancellationToken)
+    private static SetupCheck CheckVersion(WacsInstallation? installation) =>
+        installation is null
+            ? new SetupCheck("win-acme runs", SetupStatus.Fail, "wacs.exe did not run or did not report a version.")
+            : new SetupCheck("win-acme runs", SetupStatus.Pass, installation.Description);
+
+    /// <summary>
+    /// Every DNS provider this tool offers is a separate win-acme download, and none
+    /// of them load into the trimmed build. Both failures are silent at renewal time,
+    /// so they are worth reporting here.
+    /// </summary>
+    private static IEnumerable<SetupCheck> CheckPluginAvailability(
+        WacsInstallation? installation,
+        ValidationPlugin? requiredPlugin)
     {
-        try
+        if (installation is null || requiredPlugin is null)
         {
-            var result = await runner
-                .RunAsync(WacsArgumentBuilder.BuildVersion(wacsPath), cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-
-            var version = result.OutputLines.FirstOrDefault(
-                line => line.Contains("version", StringComparison.OrdinalIgnoreCase));
-
-            return result.Succeeded
-                ? new SetupCheck("win-acme runs", SetupStatus.Pass, version?.Trim() ?? "wacs.exe started and exited cleanly.")
-                : new SetupCheck("win-acme runs", SetupStatus.Fail, $"wacs.exe exited with code {result.ExitCode}.");
+            yield break;
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+
+        if (!installation.SupportsPlugins)
         {
-            return new SetupCheck("win-acme runs", SetupStatus.Fail, exception.Message);
+            yield return new SetupCheck(
+                "DNS plugin",
+                SetupStatus.Fail,
+                $"This is the trimmed build, which cannot load the {requiredPlugin.DisplayName} plugin. "
+                + "Install the pluggable build instead.");
+
+            yield break;
         }
+
+        yield return installation.HasPlugin(requiredPlugin.Id)
+            ? new SetupCheck("DNS plugin", SetupStatus.Pass, $"{requiredPlugin.DisplayName} plugin is loaded.")
+            : new SetupCheck(
+                "DNS plugin",
+                SetupStatus.Fail,
+                $"The {requiredPlugin.DisplayName} plugin is not installed. It is a separate download; "
+                + "use Download and install to add it.");
     }
 
     private static SetupCheck CheckElevation() =>

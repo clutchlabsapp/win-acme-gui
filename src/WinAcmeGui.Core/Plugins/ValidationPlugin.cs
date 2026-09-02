@@ -25,6 +25,18 @@ public sealed class ValidationPlugin
     /// </summary>
     public Func<ValuesLookup, IEnumerable<string>>? ExtraValidation { get; init; }
 
+    /// <summary>
+    /// One argument that only this plugin contributes, used to tell from wacs.exe
+    /// --help output whether the plugin is installed. It has to be distinctive:
+    /// the Azure DNS plugin and the KeyVault store plugin share several arguments,
+    /// so matching on any of them would give a false positive.
+    /// </summary>
+    public string DetectionFlag { get; init; } = string.Empty;
+
+    /// <summary>The detection flag, falling back to the first field.</summary>
+    public string EffectiveDetectionFlag =>
+        DetectionFlag.Length > 0 ? "--" + DetectionFlag : Fields[0].Flag;
+
     public PluginField? FindField(string name) =>
         Fields.FirstOrDefault(f => string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
 }

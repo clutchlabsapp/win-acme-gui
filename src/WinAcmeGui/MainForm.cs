@@ -17,6 +17,7 @@ public sealed class MainForm : Form
     private readonly IWacsRunner _runner = new WacsRunner();
 
     private readonly TextBox _wacsPath = Ui.Text();
+    private readonly Label _wacsStatus = new() { AutoSize = true, ForeColor = SystemColors.GrayText };
     private readonly TextBox _email = Ui.Text();
     private readonly CheckBox _acceptTos = new() { Text = "I accept the ACME terms of service", AutoSize = true };
     private readonly CheckBox _testServer = new() { Text = "Use the Let's Encrypt staging server (test certificates)", AutoSize = true };
@@ -59,6 +60,10 @@ public sealed class MainForm : Form
     private Button _cancelButton = null!;
 
     private Button _browseScript = null!;
+    private Button _installButton = null!;
+
+    /// <summary>What wacs.exe reports about itself, or null when it is not installed.</summary>
+    private WacsInstallation? _installation;
 
     private CancellationTokenSource? _running;
     private bool _loading = true;
@@ -155,6 +160,21 @@ public sealed class MainForm : Form
         _wacsPath.TextChanged += OnInputChanged;
 
         Ui.AddRow(grid, "wacs.exe", pathRow, "The win-acme executable. Found automatically in the usual locations.");
+
+        _installButton = Ui.Button("Download and install win-acme...", OnInstallWinAcme);
+
+        var actions = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            Margin = Padding.Empty,
+        };
+
+        actions.Controls.Add(_installButton);
+
+        Ui.AddFullWidth(grid, _wacsStatus);
+        Ui.AddFullWidth(grid, actions);
 
         return Ui.Group("win-acme", grid);
     }
@@ -464,6 +484,7 @@ public sealed class MainForm : Form
             _pluginFields.ShowPlugin(plugin, remembered);
         }
 
+        UpdateInstallationStatus();
         RefreshPreview();
     }
 
@@ -551,6 +572,7 @@ public sealed class MainForm : Form
 
         var idle = _running is null;
         _createButton.Enabled = idle && problems.Count == 0;
+        _installButton.Enabled = idle;
         _checkButton.Enabled = idle;
         _renewButton.Enabled = idle && wacsPath.Length > 0;
     }
@@ -603,6 +625,7 @@ public sealed class MainForm : Form
         if (dialog.ShowDialog(this) == DialogResult.OK)
         {
             _wacsPath.Text = dialog.FileName;
+            _ = RefreshInstallationAsync();
         }
     }
 
@@ -701,7 +724,7 @@ public sealed class MainForm : Form
         await WithBusyAsync("Checking setup", async token =>
         {
             var report = await new SetupChecker(_runner)
-                .RunAsync(_wacsPath.Text.Trim(), token)
+                .RunAsync(_wacsPath.Text.Trim(), SelectedPlugin, token)
                 .ConfigureAwait(true);
 
             foreach (var check in report.Checks)
@@ -727,6 +750,190 @@ public sealed class MainForm : Form
                 ? "Everything checks out: these certificates will renew automatically."
                 : "Some checks did not pass. Fix the items marked FAIL above.");
         });
+    }
+
+    // ------------------------------------------------------- win-acme install
+
+    /// <summary>
+    /// Asks the installed wacs.exe what it is. Runs on show and after anything that
+    /// could change the answer, rather than on every keystroke.
+    /// </summary>
+    private async Task RefreshInstallationAsync()
+    {
+        var path = _wacsPath.Text.Trim();
+
+        if (path.Length == 0)
+        {
+            _installation = null;
+            UpdateInstallationStatus();
+            return;
+        }
+
+        _wacsStatus.Text = "Checking win-acme...";
+        _wacsStatus.ForeColor = SystemColors.GrayText;
+
+        try
+        {
+            _installation = await new WacsInspector(_runner).InspectAsync(path).ConfigureAwait(true);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _installation = null;
+            AppendLog($"Could not inspect win-acme: {exception.Message}");
+        }
+
+        UpdateInstallationStatus();
+    }
+
+    private void UpdateInstallationStatus()
+    {
+        var plugin = SelectedPlugin;
+
+        if (_installation is null)
+        {
+            SetStatus("win-acme was not found. Browse to it, or download it below.", problem: true);
+            _installButton.Text = "Download and install win-acme...";
+            return;
+        }
+
+        _installButton.Text = "Download or repair win-acme...";
+
+        if (!_installation.SupportsPlugins)
+        {
+            // Every DNS provider offered here is an external plugin, and the trimmed
+            // build cannot load any of them.
+            SetStatus(
+                $"{_installation.Description} — this build cannot load DNS plugins. Install the pluggable build.",
+                problem: true);
+            return;
+        }
+
+        if (plugin is not null && !_installation.HasPlugin(plugin.Id))
+        {
+            SetStatus(
+                $"{_installation.Description} — the {plugin.DisplayName} plugin is not installed.",
+                problem: true);
+            return;
+        }
+
+        SetStatus(
+            plugin is null
+                ? _installation.Description
+                : $"{_installation.Description} — {plugin.DisplayName} plugin ready.",
+            problem: false);
+    }
+
+    private void SetStatus(string text, bool problem)
+    {
+        _wacsStatus.Text = text;
+        _wacsStatus.ForeColor = problem ? Color.Firebrick : SystemColors.GrayText;
+    }
+
+    private async void OnInstallWinAcme(object? sender, EventArgs e)
+    {
+        var plugin = SelectedPlugin;
+
+        await WithBusyAsync("Installing win-acme", async token =>
+        {
+            var installer = new WinAcmeInstaller();
+
+            AppendLog("Looking up the latest win-acme release on GitHub...");
+            var release = await installer.FetchLatestReleaseAsync(token).ConfigureAwait(true);
+
+            var main = release.MainPackage(WinAcmeInstaller.CurrentArchitecture);
+            if (main is null)
+            {
+                AppendLog($"Release {release.TagName} has no {WinAcmeInstaller.CurrentArchitecture} build.");
+                return;
+            }
+
+            var pluginAsset = plugin is null ? null : release.DnsPlugin(plugin.Id);
+            var folder = ChooseInstallFolder();
+
+            if (folder is null)
+            {
+                AppendLog("Cancelled.");
+                return;
+            }
+
+            if (!ConfirmInstall(release, main, pluginAsset, folder))
+            {
+                AppendLog("Cancelled.");
+                return;
+            }
+
+            var pluginIds = plugin is not null && pluginAsset is not null
+                ? new[] { plugin.Id }
+                : Array.Empty<string>();
+
+            var installed = await installer
+                .InstallAsync(release, folder, pluginIds, new Progress<string>(AppendLog), token)
+                .ConfigureAwait(true);
+
+            AppendLog($"Installed win-acme {release.Version} to {folder}.");
+
+            _wacsPath.Text = installed;
+            await RefreshInstallationAsync().ConfigureAwait(true);
+        }).ConfigureAwait(true);
+    }
+
+    private string? ChooseInstallFolder()
+    {
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = "Where should win-acme be installed? It must be a permanent folder, "
+                          + "because the scheduled task runs it from here.",
+            UseDescriptionForTitle = true,
+            SelectedPath = _installation?.Path is { Length: > 0 } existing
+                ? Path.GetDirectoryName(existing) ?? WinAcmeInstaller.DefaultInstallFolder
+                : WinAcmeInstaller.DefaultInstallFolder,
+        };
+
+        return dialog.ShowDialog(this) == DialogResult.OK ? dialog.SelectedPath : null;
+    }
+
+    private bool ConfirmInstall(
+        WinAcmeRelease release,
+        WinAcmeAsset main,
+        WinAcmeAsset? pluginAsset,
+        string folder)
+    {
+        var files = new List<string> { $"  {main.Name}  ({main.SizeDescription})" };
+
+        if (pluginAsset is not null)
+        {
+            files.Add($"  {pluginAsset.Name}  ({pluginAsset.SizeDescription})");
+        }
+
+        var missingPlugin = SelectedPlugin is not null && pluginAsset is null
+            ? $"
+
+Note: no separate download exists for {SelectedPlugin.DisplayName} in this release."
+            : string.Empty;
+
+        var message =
+            $"Download win-acme {release.Version} from github.com/win-acme/win-acme and unpack it to:
+
+"
+            + $"{folder}
+
+Files:
+{string.Join("
+", files)}
+
+"
+            + "The pluggable build is used because the DNS validation plugins do not work on the "
+            + "smaller trimmed build. Existing files in that folder will be overwritten."
+            + missingPlugin;
+
+        return MessageBox.Show(this, message, "Install win-acme", MessageBoxButtons.OKCancel, MessageBoxIcon.Question)
+               == DialogResult.OK;
+    }
+
+    protected override async void OnShown(EventArgs e)
+    {
+        base.OnShown(e);
+        await RefreshInstallationAsync().ConfigureAwait(true);
     }
 
     // ---------------------------------------------------------------- running
