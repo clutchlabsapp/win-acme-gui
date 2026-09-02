@@ -51,6 +51,16 @@ inbound HTTP to your server. Supported providers:
 There is no built-in Namecheap plugin in win-acme. If your domains are there, either
 delegate `_acme-challenge` with a CNAME to a provider above, or use a custom script.
 
+**These three are separate win-acme downloads.** Each ships as its own `.zip` that has to
+be unpacked next to `wacs.exe`, and none of them load into win-acme's smaller `trimmed`
+build — the `pluggable` build is required. Both mistakes fail silently: the provider just
+does not appear.
+
+The tool handles this for you. It asks `wacs.exe` which build is installed and which
+plugins it has actually loaded, and **Download and install** fetches the right build and
+the plugin for your provider straight from win-acme's GitHub releases. **Check setup**
+reports either problem before a renewal hits it.
+
 ## After renewal
 
 | Preset | What runs |
@@ -88,3 +98,15 @@ dotnet test tests/WinAcmeGui.Core.Tests/WinAcmeGui.Core.Tests.csproj
 `.NET 8 SDK` on Windows is the only requirement. The argument-building logic lives in
 `WinAcmeGui.Core`, which has no Windows or UI dependencies, so it is covered by unit
 tests; the WinForms project is a thin layer over it.
+
+## Credit
+
+All the actual certificate work is done by [win-acme](https://www.win-acme.com/), an
+open-source ACME client by Wouter Tinus. This tool is only a front end for it — if you
+find it useful, the thanks belong upstream:
+
+- [GitHub Sponsors](https://github.com/sponsors/WouterTinus)
+- [Patreon](https://www.patreon.com/woutertinus)
+- [PayPal](https://www.paypal.me/woutertinus)
+
+win-acme: [website](https://www.win-acme.com/) · [source](https://github.com/win-acme/win-acme) · [releases](https://github.com/win-acme/win-acme/releases) · [manual](https://www.win-acme.com/manual/getting-started)

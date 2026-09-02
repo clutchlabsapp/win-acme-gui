@@ -898,35 +898,40 @@ public sealed class MainForm : Form
         WinAcmeAsset? pluginAsset,
         string folder)
     {
-        var files = new List<string> { $"  {main.Name}  ({main.SizeDescription})" };
+        // Built as lines rather than with embedded escapes, so the message stays
+        // readable and there is nothing to get wrong about line endings.
+        var lines = new List<string>
+        {
+            $"Download win-acme {release.Version} from github.com/win-acme/win-acme",
+            "and unpack it to:",
+            string.Empty,
+            folder,
+            string.Empty,
+            "Files:",
+            $"    {main.Name}  ({main.SizeDescription})",
+        };
 
         if (pluginAsset is not null)
         {
-            files.Add($"  {pluginAsset.Name}  ({pluginAsset.SizeDescription})");
+            lines.Add($"    {pluginAsset.Name}  ({pluginAsset.SizeDescription})");
         }
 
-        var missingPlugin = SelectedPlugin is not null && pluginAsset is null
-            ? $"
+        lines.Add(string.Empty);
+        lines.Add("The pluggable build is used because the DNS validation plugins do not");
+        lines.Add("work on the smaller trimmed build. Existing files will be overwritten.");
 
-Note: no separate download exists for {SelectedPlugin.DisplayName} in this release."
-            : string.Empty;
+        if (SelectedPlugin is not null && pluginAsset is null)
+        {
+            lines.Add(string.Empty);
+            lines.Add($"Note: this release has no separate download for {SelectedPlugin.DisplayName}.");
+        }
 
-        var message =
-            $"Download win-acme {release.Version} from github.com/win-acme/win-acme and unpack it to:
-
-"
-            + $"{folder}
-
-Files:
-{string.Join("
-", files)}
-
-"
-            + "The pluggable build is used because the DNS validation plugins do not work on the "
-            + "smaller trimmed build. Existing files in that folder will be overwritten."
-            + missingPlugin;
-
-        return MessageBox.Show(this, message, "Install win-acme", MessageBoxButtons.OKCancel, MessageBoxIcon.Question)
+        return MessageBox.Show(
+                   this,
+                   string.Join(Environment.NewLine, lines),
+                   "Install win-acme",
+                   MessageBoxButtons.OKCancel,
+                   MessageBoxIcon.Question)
                == DialogResult.OK;
     }
 
