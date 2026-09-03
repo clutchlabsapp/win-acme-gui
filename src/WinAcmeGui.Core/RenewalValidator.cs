@@ -82,6 +82,9 @@ public static class RenewalValidator
             }
         }
 
+        // Whether the helper is actually on disk, and in a folder win-acme can run it
+        // from, is checked in the UI: it needs the filesystem and the wacs.exe path.
+
         if (plugin.ExtraValidation is not null)
         {
             problems.AddRange(plugin.ExtraValidation(new ValuesLookup(validation.Values)));

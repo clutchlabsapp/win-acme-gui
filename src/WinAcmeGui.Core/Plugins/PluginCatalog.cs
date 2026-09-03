@@ -9,6 +9,10 @@ public static class PluginCatalog
     public const string CloudflareId = "cloudflare";
     public const string Route53Id = "route53";
     public const string AzureId = "azure";
+    public const string NamecheapId = "namecheap";
+
+    /// <summary>Where to get the Namecheap helper, since it has no published binary.</summary>
+    public const string NamecheapHelperUrl = "https://github.com/fynydd/Fynydd.NameCheap";
 
     public static IReadOnlyList<ValidationPlugin> ValidationPlugins { get; } =
     [
@@ -132,6 +136,73 @@ public static class PluginCatalog
                     {
                         "Azure DNS needs either a managed identity, or all of tenant ID, client ID and client secret.",
                     },
+        },
+        new ValidationPlugin
+        {
+            Id = NamecheapId,
+            DetectionFlag = "dnsscript",
+            DisplayName = "Namecheap (via Fynydd.NameCheap)",
+            Description = "Namecheap has no win-acme plugin. This drives Fynydd.NameCheap, a small "
+                          + "helper program you build yourself, through win-acme's built-in script "
+                          + "plugin. Its credentials live in an appsettings.json next to it, so they "
+                          + "never appear on a command line.",
+
+            // The script plugin ships inside win-acme, so unlike the others this needs
+            // no plugin download and works on the trimmed build.
+            RequiresSeparateDownload = false,
+
+            ScriptWiring = new ScriptWiring
+            {
+                ExecutableFieldName = "namecheapexe",
+                ExpectedFileName = "NameCheap.exe",
+
+                // Matches the helper's own command line:
+                //   NameCheap.exe [create|delete] [hostname] [name] [value]
+                CreateArguments = "create {ZoneName} {NodeName} {Token}",
+                DeleteArguments = "delete {ZoneName} {NodeName} {Token}",
+            },
+
+            Fields =
+            [
+                new PluginField
+                {
+                    Name = "namecheapexe",
+                    Label = "NameCheap.exe",
+                    Kind = PluginFieldKind.FilePath,
+                    Help = "Built from " + NamecheapHelperUrl + ". Note the file is NameCheap.exe, not "
+                           + "Fynydd.NameCheap.exe as its readme says. Keep it in the win-acme folder.",
+                },
+                new PluginField
+                {
+                    Name = "apikey",
+                    Label = "API key",
+                    Kind = PluginFieldKind.Secret,
+                    Destination = PluginFieldDestination.ExternalFile,
+                    Help = "Enable the API and get a key at namecheap.com/support/api/intro.",
+                },
+                new PluginField
+                {
+                    Name = "username",
+                    Label = "Username",
+                    Destination = PluginFieldDestination.ExternalFile,
+                    Help = "Your Namecheap sign-in name.",
+                },
+                new PluginField
+                {
+                    Name = "apiusername",
+                    Label = "API username",
+                    Destination = PluginFieldDestination.ExternalFile,
+                    Help = "Usually the same as the username.",
+                },
+                new PluginField
+                {
+                    Name = "clientip",
+                    Label = "Whitelisted IP",
+                    Destination = PluginFieldDestination.ExternalFile,
+                    Help = "Must be this server's current public IP, and whitelisted in your Namecheap "
+                           + "API settings. Namecheap checks the two match.",
+                },
+            ],
         },
     ];
 

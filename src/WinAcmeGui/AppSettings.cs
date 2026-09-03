@@ -101,7 +101,10 @@ public sealed class AppSettings
             return;
         }
 
-        foreach (var field in plugin.Fields.Where(f => !f.IsSecret))
+        // Secrets are never stored here. Neither are values that belong to an external
+        // helper's own config file, so that file stays the single source of truth and
+        // the two copies cannot drift apart.
+        foreach (var field in plugin.Fields.Where(f => !f.IsSecret && !f.IsExternal))
         {
             var value = validation[field.Name];
             if (!string.IsNullOrWhiteSpace(value))

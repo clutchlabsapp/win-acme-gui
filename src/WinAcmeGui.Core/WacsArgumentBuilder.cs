@@ -204,10 +204,24 @@ public static class WacsArgumentBuilder
         }
 
         args.Add("--validationmode", plugin.ValidationMode);
+
+        if (plugin.ScriptWiring is { } wiring)
+        {
+            AddScriptValidation(args, wiring, validation);
+            return;
+        }
+
         args.Add("--validation", plugin.Id);
 
         foreach (var field in plugin.Fields)
         {
+            // Credentials that live in a helper's own config file must never reach a
+            // command line, so they are skipped here rather than merely left blank.
+            if (field.IsExternal)
+            {
+                continue;
+            }
+
             var value = validation[field.Name].Trim();
 
             if (field.Kind == PluginFieldKind.Boolean)
@@ -225,6 +239,36 @@ public static class WacsArgumentBuilder
                 args.Add(field.Flag, value, field.IsSecret);
             }
         }
+    }
+
+    /// <summary>
+    /// Drives an external helper through win-acme's built-in <c>script</c> plugin.
+    /// </summary>
+    /// <remarks>
+    /// <c>--dnsscript</c> is the integrated create-and-delete form, which is right when
+    /// one executable handles both and is told which to do by its first argument.
+    /// <para>
+    /// <c>--dnsscriptparallelism</c> is deliberately left unset, which means serial.
+    /// A helper that has no per-record API has to read the whole record set, edit it
+    /// and write it back, so two creates running at once would overwrite each other.
+    /// </para>
+    /// </remarks>
+    private static void AddScriptValidation(
+        ArgumentList args,
+        ScriptWiring wiring,
+        ValidationSettings validation)
+    {
+        args.Add("--validation", "script");
+
+        var executable = validation[wiring.ExecutableFieldName].Trim();
+        if (executable.Length == 0)
+        {
+            return;
+        }
+
+        args.Add("--dnsscript", executable);
+        args.AddIfPresent("--dnscreatescriptarguments", wiring.CreateArguments);
+        args.AddIfPresent("--dnsdeletescriptarguments", wiring.DeleteArguments);
     }
 
     /// <summary>

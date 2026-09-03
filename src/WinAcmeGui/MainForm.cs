@@ -61,6 +61,9 @@ public sealed class MainForm : Form
 
     private Button _browseScript = null!;
     private Button _installButton = null!;
+    private Button _saveCredentials = null!;
+    private Button _reloadCredentials = null!;
+    private FlowLayoutPanel _credentialActions = null!;
 
     /// <summary>What wacs.exe reports about itself, or null when it is not installed.</summary>
     private WacsInstallation? _installation;
@@ -227,6 +230,21 @@ public sealed class MainForm : Form
         Ui.AddRow(grid, "DNS provider", _validationPlugin,
             "DNS validation is used throughout: it works for wildcards and needs no inbound HTTP.");
         Ui.AddFullWidth(grid, _pluginFields);
+
+        _saveCredentials = Ui.Button("Save credentials to appsettings.json", OnSaveNamecheapCredentials);
+        _reloadCredentials = Ui.Button("Reload", OnReloadNamecheapCredentials);
+
+        _credentialActions = new FlowLayoutPanel
+        {
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            WrapContents = false,
+            Margin = Padding.Empty,
+            Visible = false,
+        };
+
+        _credentialActions.Controls.AddRange([_saveCredentials, _reloadCredentials]);
+        Ui.AddFullWidth(grid, _credentialActions);
 
         return Ui.Group("Validation", grid);
     }
@@ -406,6 +424,7 @@ public sealed class MainForm : Form
             .FindIndex(p => string.Equals(p.Id, _settings.ValidationPluginId, StringComparison.OrdinalIgnoreCase));
 
         _validationPlugin.SelectedIndex = index >= 0 ? index : 0;
+        UpdateCredentialActions();
 
         // Selecting the plugin above fires the changed handler, which draws the fields;
         // draw them again with the remembered values now that the handler has run.
@@ -484,6 +503,7 @@ public sealed class MainForm : Form
             _pluginFields.ShowPlugin(plugin, remembered);
         }
 
+        UpdateCredentialActions();
         UpdateInstallationStatus();
         RefreshPreview();
     }
@@ -561,6 +581,7 @@ public sealed class MainForm : Form
         }
 
         problems.AddRange(ShowResolvedScriptPath(definition));
+        problems.AddRange(CheckScriptHelper());
 
         _problems.Text = problems.Count == 0
             ? string.Empty
@@ -752,6 +773,194 @@ public sealed class MainForm : Form
         });
     }
 
+    // ------------------------------------------------------ namecheap helper
+
+    /// <summary>
+    /// Shows the credential buttons only for a provider whose credentials live in an
+    /// external file, and loads whatever is already in that file.
+    /// </summary>
+    private void UpdateCredentialActions()
+    {
+        var wiring = SelectedPlugin?.ScriptWiring;
+        _credentialActions.Visible = wiring is not null;
+
+        if (wiring is null)
+        {
+            return;
+        }
+
+        LoadNamecheapCredentials();
+    }
+
+    private void LoadNamecheapCredentials()
+    {
+        var wiring = SelectedPlugin?.ScriptWiring;
+        if (wiring is null)
+        {
+            return;
+        }
+
+        var executable = _pluginFields.ValueOf(wiring.ExecutableFieldName);
+        var credentials = NamecheapSettingsFile.Read(executable);
+
+        if (credentials == NamecheapCredentials.Empty)
+        {
+            return;
+        }
+
+        _updatingUi = true;
+        try
+        {
+            _pluginFields.SetValue("apikey", credentials.ApiKey);
+            _pluginFields.SetValue("username", credentials.UserName);
+            _pluginFields.SetValue("apiusername", credentials.ApiUserName);
+            _pluginFields.SetValue("clientip", credentials.ClientIp);
+        }
+        finally
+        {
+            _updatingUi = false;
+        }
+    }
+
+    private void OnReloadNamecheapCredentials(object? sender, EventArgs e)
+    {
+        LoadNamecheapCredentials();
+        RefreshPreview();
+        AppendLog("Reloaded credentials from appsettings.json.");
+    }
+
+    /// <summary>
+    /// Writes the credentials, but only when explicitly asked and only after showing
+    /// exactly which file is about to be written. This is the one place the tool puts
+    /// a secret on disk, and it does so because the helper has no other way to read it.
+    /// </summary>
+    private void OnSaveNamecheapCredentials(object? sender, EventArgs e)
+    {
+        var wiring = SelectedPlugin?.ScriptWiring;
+        if (wiring is null)
+        {
+            return;
+        }
+
+        var executable = _pluginFields.ValueOf(wiring.ExecutableFieldName);
+        if (executable.Length == 0)
+        {
+            MessageBox.Show(
+                this,
+                $"Choose {wiring.ExpectedFileName} first — the settings file is written next to it.",
+                "Save credentials",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+
+            return;
+        }
+
+        var path = NamecheapSettingsFile.ExpectedPath(executable);
+
+        var confirmed = MessageBox.Show(
+            this,
+            string.Join(Environment.NewLine,
+            [
+                "Write your Namecheap API credentials to:",
+                string.Empty,
+                path,
+                string.Empty,
+                "The API key is stored there in plain text. That is how the helper reads it,",
+                "so protect the folder with file permissions.",
+            ]),
+            "Save credentials",
+            MessageBoxButtons.OKCancel,
+            MessageBoxIcon.Warning);
+
+        if (confirmed != DialogResult.OK)
+        {
+            return;
+        }
+
+        try
+        {
+            NamecheapSettingsFile.Write(executable, new NamecheapCredentials(
+                _pluginFields.ValueOf("apikey"),
+                _pluginFields.ValueOf("username"),
+                _pluginFields.ValueOf("apiusername"),
+                _pluginFields.ValueOf("clientip")));
+
+            AppendLog($"Wrote credentials to {path}.");
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(
+                this,
+                $"Could not write {path}:{Environment.NewLine}{Environment.NewLine}{exception.Message}",
+                "Save credentials",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+        }
+
+        RefreshPreview();
+    }
+
+    /// <summary>
+    /// Checks the things about the helper that Core cannot: that it exists, that its
+    /// settings file is filled in, and that it sits where win-acme can actually run it.
+    /// </summary>
+    private IEnumerable<string> CheckScriptHelper()
+    {
+        var wiring = SelectedPlugin?.ScriptWiring;
+        if (wiring is null)
+        {
+            return Array.Empty<string>();
+        }
+
+        var executable = _pluginFields.ValueOf(wiring.ExecutableFieldName);
+        if (executable.Length == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var problems = new List<string>();
+
+        if (!File.Exists(executable))
+        {
+            problems.Add($"{wiring.ExpectedFileName} not found at {executable}.");
+            return problems;
+        }
+
+        // win-acme's ScriptClient never sets a working directory, and the helper loads
+        // appsettings.json relative to the current directory rather than from beside
+        // itself. If it is not in the win-acme folder it throws before reaching the API.
+        var wacsFolder = Path.GetDirectoryName(_wacsPath.Text.Trim());
+        var helperFolder = Path.GetDirectoryName(executable);
+
+        if (!string.IsNullOrEmpty(wacsFolder)
+            && !string.IsNullOrEmpty(helperFolder)
+            && !string.Equals(
+                Path.GetFullPath(wacsFolder).TrimEnd(Path.DirectorySeparatorChar),
+                Path.GetFullPath(helperFolder).TrimEnd(Path.DirectorySeparatorChar),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            problems.Add(
+                $"Move {wiring.ExpectedFileName} and its {NamecheapSettingsFile.FileName} into the "
+                + "win-acme folder. It reads its settings from the working directory, and win-acme "
+                + "runs scripts from its own folder.");
+        }
+
+        var settingsPath = NamecheapSettingsFile.ExpectedPath(executable);
+        if (!File.Exists(settingsPath))
+        {
+            problems.Add($"{settingsPath} does not exist. Fill in the credentials and press Save.");
+            return problems;
+        }
+
+        var missing = NamecheapSettingsFile.Read(executable).MissingValues;
+        if (missing.Count > 0)
+        {
+            problems.Add($"{NamecheapSettingsFile.FileName} is missing: {string.Join(", ", missing)}.");
+        }
+
+        return problems;
+    }
+
     // ------------------------------------------------------- win-acme install
 
     /// <summary>
@@ -808,7 +1017,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        if (plugin is not null && !_installation.HasPlugin(plugin.Id))
+        if (plugin is { RequiresSeparateDownload: true } && !_installation.HasPlugin(plugin.Id))
         {
             SetStatus(
                 $"{_installation.Description} — the {plugin.DisplayName} plugin is not installed.",
@@ -847,7 +1056,9 @@ public sealed class MainForm : Form
                 return;
             }
 
-            var pluginAsset = plugin is null ? null : release.DnsPlugin(plugin.Id);
+            var pluginAsset = plugin is { RequiresSeparateDownload: true }
+                ? release.DnsPlugin(plugin.Id)
+                : null;
             var folder = ChooseInstallFolder();
 
             if (folder is null)
@@ -920,7 +1131,7 @@ public sealed class MainForm : Form
         lines.Add("The pluggable build is used because the DNS validation plugins do not");
         lines.Add("work on the smaller trimmed build. Existing files will be overwritten.");
 
-        if (SelectedPlugin is not null && pluginAsset is null)
+        if (SelectedPlugin is { RequiresSeparateDownload: true } && pluginAsset is null)
         {
             lines.Add(string.Empty);
             lines.Add($"Note: this release has no separate download for {SelectedPlugin.DisplayName}.");

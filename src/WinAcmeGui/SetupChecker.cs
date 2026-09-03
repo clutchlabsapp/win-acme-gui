@@ -104,6 +104,18 @@ internal sealed class SetupChecker(IWacsRunner runner)
             yield break;
         }
 
+        if (!requiredPlugin.RequiresSeparateDownload)
+        {
+            // Driven through the built-in script plugin, so there is nothing to install
+            // and the trimmed build is fine.
+            yield return new SetupCheck(
+                "DNS plugin",
+                SetupStatus.Pass,
+                $"{requiredPlugin.DisplayName} uses win-acme's built-in script plugin; nothing to install.");
+
+            yield break;
+        }
+
         if (!installation.SupportsPlugins)
         {
             yield return new SetupCheck(
