@@ -85,8 +85,10 @@ public sealed class MainForm : Form
     public MainForm()
     {
         Text = "win-acme GUI";
-        MinimumSize = new Size(780, 620);
-        Size = new Size(940, 800);
+        // Sized for the tallest tab — Azure DNS has seven fields, After renewal six —
+        // so no page needs its scrollbar at a normal font scale.
+        MinimumSize = new Size(720, 560);
+        Size = new Size(880, 700);
         StartPosition = FormStartPosition.CenterScreen;
 
         BuildUi();

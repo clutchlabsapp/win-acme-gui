@@ -107,9 +107,9 @@ internal sealed class PluginFieldPanel : Panel
 
     private void AddField(TableLayoutPanel grid, PluginField field, string initialValue)
     {
-        if (field.Kind == PluginFieldKind.FilePath)
+        if (field.Kind is PluginFieldKind.FilePath or PluginFieldKind.FolderPath)
         {
-            AddFilePathField(grid, field, initialValue);
+            AddPathField(grid, field, initialValue);
             return;
         }
 
@@ -141,7 +141,7 @@ internal sealed class PluginFieldPanel : Panel
         Ui.AddRow(grid, label, input, field.Help);
     }
 
-    private void AddFilePathField(TableLayoutPanel grid, PluginField field, string initialValue)
+    private void AddPathField(TableLayoutPanel grid, PluginField field, string initialValue)
     {
         var input = new TextBox { Text = initialValue, Dock = DockStyle.Fill };
         input.TextChanged += RaiseValuesChanged;
@@ -158,13 +158,19 @@ internal sealed class PluginFieldPanel : Panel
         row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
         row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
         row.Controls.Add(input, 0, 0);
-        row.Controls.Add(Ui.Button("Browse...", (_, _) => BrowseForFile(field, input)), 1, 0);
+        row.Controls.Add(Ui.Button("Browse...", (_, _) => Browse(field, input)), 1, 0);
 
         Ui.AddRow(grid, field.Required ? field.Label + " *" : field.Label, row, field.Help);
     }
 
-    private void BrowseForFile(PluginField field, TextBox input)
+    private void Browse(PluginField field, TextBox input)
     {
+        if (field.Kind == PluginFieldKind.FolderPath)
+        {
+            BrowseForFolder(field, input);
+            return;
+        }
+
         var expected = _plugin?.ScriptWiring?.ExpectedFileName ?? string.Empty;
 
         using var dialog = new OpenFileDialog
@@ -186,6 +192,26 @@ internal sealed class PluginFieldPanel : Panel
         if (dialog.ShowDialog(this) == DialogResult.OK)
         {
             input.Text = dialog.FileName;
+        }
+    }
+
+    private void BrowseForFolder(PluginField field, TextBox input)
+    {
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = field.Help.Length > 0 ? field.Help : field.Label,
+            UseDescriptionForTitle = true,
+        };
+
+        var current = input.Text.Trim();
+        if (current.Length > 0 && Directory.Exists(current))
+        {
+            dialog.SelectedPath = current;
+        }
+
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            input.Text = dialog.SelectedPath;
         }
     }
 
