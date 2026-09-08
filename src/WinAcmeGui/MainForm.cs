@@ -1314,7 +1314,7 @@ public sealed class MainForm : Form
             }
 
             var pluginAsset = plugin is { RequiresSeparateDownload: true }
-                ? release.DnsPlugin(plugin.Id)
+                ? release.DnsPlugin(plugin.EffectiveDownloadName)
                 : null;
             var folder = ChooseInstallFolder();
 

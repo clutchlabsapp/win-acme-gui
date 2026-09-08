@@ -54,6 +54,15 @@ public sealed class ValidationPlugin
     /// </remarks>
     public string HelpCondition => $"--validation {(UsesScript ? "script" : Id)}";
 
+    /// <summary>
+    /// The name in the release asset <c>plugin.validation.dns.&lt;name&gt;.v….zip</c>.
+    /// Usually the plugin id, but not always: Google Cloud DNS answers to
+    /// <c>--validation gcpdns</c> and ships as <c>googledns</c>.
+    /// </summary>
+    public string DownloadName { get; init; } = string.Empty;
+
+    public string EffectiveDownloadName => DownloadName.Length > 0 ? DownloadName : Id;
+
     public PluginField? FindField(string name) =>
         Fields.FirstOrDefault(f => string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));
 }
