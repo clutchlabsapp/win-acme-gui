@@ -47,6 +47,12 @@ inbound HTTP to your server. Supported providers:
 | Cloudflare | `cloudflare` | An API token scoped to `Zone:DNS:Edit` — not the global API key |
 | Amazon Route 53 | `route53` | The instance IAM role, or an access key ID and secret |
 | Azure DNS | `azure` | Subscription and resource group, plus a managed identity or an app registration |
+| Google Cloud DNS | `gcpdns` | A service account `.json` key with the DNS Administrator role, and the project ID |
+| GoDaddy | `godaddy` | API key and secret |
+| DNS Made Easy | `dnsmadeeasy` | API key and secret |
+| DigitalOcean | `digitalocean` | A personal access token with write scope |
+| Linode | `linode` | A personal access token with read/write on Domains |
+| DreamHost | `dreamhost` | API key |
 
 | Namecheap | `script` + helper | [Fynydd.NameCheap](https://github.com/fynydd/Fynydd.NameCheap), plus your Namecheap API credentials |
 

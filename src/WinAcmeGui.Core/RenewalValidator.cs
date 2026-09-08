@@ -20,6 +20,7 @@ public static class RenewalValidator
         ValidateValidation(definition.Validation, problems);
         ValidateChallengeSuitsHostNames(definition, problems);
         ValidateInstallation(definition.Installation, definition.Store, problems);
+        ValidateStore(definition.Store, problems);
 
         return problems;
     }
@@ -110,6 +111,14 @@ public static class RenewalValidator
             problems.Add(
                 $"{string.Join(", ", wildcards)} needs DNS validation. Wildcard certificates cannot be "
                 + "issued with an HTTP challenge.");
+        }
+    }
+
+    private static void ValidateStore(StoreSettings store, List<string> problems)
+    {
+        if (store.ExportsFiles && string.IsNullOrWhiteSpace(store.ExportFolder))
+        {
+            problems.Add("Choose a folder to export the certificate files to.");
         }
     }
 

@@ -51,14 +51,15 @@ public class WacsInspectorTests
     public void DetectsInstalledPluginsFromTheirCommandLineArguments()
     {
         const string help = """
-            --validation
-              Specify which validation plugin to run.
+            ## Cloudflare
+            ``` [--validation cloudflare] ```
+               --cloudflareapitoken
+                 API Token for Cloudflare.
 
-            --cloudflareapitoken
-              API Token for Cloudflare.
-
-            --route53iamrole
-              AWS IAM role for the current EC2 instance.
+            ## Route53
+            ``` [--validation route53] ```
+               --route53iamrole
+                 AWS IAM role for the current EC2 instance.
             """;
 
         var plugins = WacsInspector.ReadAvailablePlugins(help);
@@ -72,16 +73,19 @@ public class WacsInspectorTests
     public void TheKeyVaultStoreIsNotMistakenForTheAzureDnsPlugin()
     {
         // The KeyVault store plugin contributes --azuretenantid, --azureclientid and
-        // --azuresecret too. Only --azuresubscriptionid belongs to the DNS plugin.
+        // --azuresecret too, so matching arguments would give a false positive. Its
+        // condition is --store keyvault, not --validation azure.
         const string keyVaultOnlyHelp = """
-            --vaultname
-              The name of the vault
-            --azuretenantid
-              Directory/tenant identifier.
-            --azureclientid
-              Application/client identifier.
-            --azuresecret
-              Client secret.
+            ## Azure KeyVault
+            ``` [--store keyvault] ```
+               --vaultname
+                 The name of the vault
+               --azuretenantid
+                 Directory/tenant identifier.
+               --azureclientid
+                 Application/client identifier.
+               --azuresecret
+                 Client secret.
             """;
 
         Assert.DoesNotContain(PluginCatalog.AzureId, WacsInspector.ReadAvailablePlugins(keyVaultOnlyHelp));
@@ -91,8 +95,10 @@ public class WacsInspectorTests
     public void DetectsAzureWhenItsOwnArgumentIsPresent()
     {
         const string help = """
-            --azuresubscriptionid
-              Subscription ID to login into Microsoft Azure DNS.
+            ## Azure
+            ``` [--validation azure] ```
+               --azuresubscriptionid
+                 Subscription ID to login into Microsoft Azure DNS.
             """;
 
         Assert.Contains(PluginCatalog.AzureId, WacsInspector.ReadAvailablePlugins(help));
@@ -106,12 +112,12 @@ public class WacsInspectorTests
     }
 
     [Fact]
-    public void EveryCatalogPluginHasADistinctDetectionFlag()
+    public void EveryCatalogPluginIsDetectedByItsOwnCondition()
     {
-        var flags = PluginCatalog.ValidationPlugins.Select(p => p.EffectiveDetectionFlag).ToList();
+        var conditions = PluginCatalog.ValidationPlugins.Select(p => p.HelpCondition).ToList();
 
-        Assert.Equal(flags.Count, flags.Distinct(StringComparer.OrdinalIgnoreCase).Count());
-        Assert.All(flags, flag => Assert.StartsWith("--", flag, StringComparison.Ordinal));
+        Assert.Equal(conditions.Count, conditions.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.All(conditions, c => Assert.StartsWith("--validation ", c, StringComparison.Ordinal));
     }
 
     [Fact]

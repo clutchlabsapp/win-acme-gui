@@ -36,13 +36,7 @@ public static class WacsArgumentBuilder
         // Validation.
         AddValidation(args, definition.Validation);
 
-        // Store.
-        args.AddIfPresent("--store", definition.Store.PluginId);
-        args.AddIfPresent("--certificatestore", definition.Store.StoreName);
-        if (definition.Store.KeepExisting)
-        {
-            args.Add("--keepexisting");
-        }
+        AddStore(args, definition.Store);
 
         // Always say something about installation, otherwise win-acme may fall back
         // to its interactive prompt and the run hangs with nobody to answer it.
@@ -65,6 +59,13 @@ public static class WacsArgumentBuilder
     public const string StagingNameSuffix = "[staging test]";
 
     /// <summary>
+    /// win-acme's value for "do not save the certificate anywhere". It still keeps a
+    /// password-protected copy in its own cache folder; that is not a store plugin and
+    /// is left alone.
+    /// </summary>
+    public const string NoStore = "none";
+
+    /// <summary>
     /// A dry run of the current configuration against the Let's Encrypt staging
     /// endpoint. It proves the parts that actually go wrong — the account, the
     /// validation plugin, the credentials and the challenge — without spending a live
@@ -74,10 +75,10 @@ public static class WacsArgumentBuilder
     /// The definition is deliberately isolated from the real one in three ways:
     /// a distinct friendly name so it cannot overwrite the real renewal; no
     /// installation steps, because binding a staging certificate to IIS or importing
-    /// it into the RDP listener would be actively harmful; and a .pfx file store, so
-    /// an untrusted certificate never lands in the machine certificate store. The
-    /// store and installation are already covered by the setup checks, so replacing
-    /// them here costs no signal.
+    /// it into the RDP listener would be actively harmful; and no store at all, so
+    /// nothing is written to disk and no untrusted certificate reaches the machine
+    /// certificate store. Storage and installation are already covered by the setup
+    /// checks, so dropping them here costs no signal.
     /// <para>
     /// This does create and delete real DNS records — that is the point — so pair it
     /// with <see cref="BuildCancelRenewal"/> to remove the renewal afterwards.
@@ -104,32 +105,14 @@ public static class WacsArgumentBuilder
             Validation = definition.Validation,
             Store = new StoreSettings
             {
-                PluginId = "pfxfile",
+                PluginId = NoStore,
                 StoreName = string.Empty,
             },
             Installation = new InstallationSettings(),
         };
 
-        var args = BuildCreateRenewal(wacsPath, dryRun).Arguments.ToList();
-
-        // --pfxfilepath belongs to the pfxfile store and has no field on the model,
-        // so it is spliced in after the store rather than threaded through
-        // StoreSettings for the sake of one dry-run-only option.
-        var storeFlag = args.FindIndex(a => a.Value == "--store");
-        var insertAt = storeFlag < 0 ? args.Count : storeFlag + 2;
-
-        args.InsertRange(insertAt,
-        [
-            new WacsArgument("--pfxfilepath"),
-            new WacsArgument(StagingCertificateFolder),
-        ]);
-
-        return new WacsCommand(wacsPath, args);
+        return BuildCreateRenewal(wacsPath, dryRun);
     }
-
-    /// <summary>Where a dry run's certificate is written; nothing reads it afterwards.</summary>
-    public static string StagingCertificateFolder =>
-        Path.Combine(Path.GetTempPath(), "win-acme-gui-staging");
 
     /// <summary>
     /// The name a dry run's renewal is stored under. Deterministic, so the cleanup
@@ -223,6 +206,63 @@ public static class WacsArgumentBuilder
         args.Add("--verbose");
 
         return new WacsCommand(wacsPath, args.ToArray());
+    }
+
+    /// <summary>
+    /// Where the certificate is saved. win-acme accepts a comma-separated list of
+    /// store plugins, so the file exports are added alongside the Windows certificate
+    /// store rather than replacing it — IIS bindings and the RD and Exchange scripts
+    /// all read the certificate back out of that store, and dropping it would break
+    /// every post-renewal hook.
+    /// </summary>
+    private static void AddStore(ArgumentList args, StoreSettings store)
+    {
+        if (string.Equals(store.PluginId, NoStore, StringComparison.OrdinalIgnoreCase))
+        {
+            args.Add("--store", NoStore);
+            return;
+        }
+
+        var stores = new List<string>();
+        if (!string.IsNullOrWhiteSpace(store.PluginId))
+        {
+            stores.Add(store.PluginId.Trim());
+        }
+
+        if (store.ExportPfx)
+        {
+            stores.Add("pfxfile");
+        }
+
+        if (store.ExportPem)
+        {
+            stores.Add("pemfiles");
+        }
+
+        if (stores.Count == 0)
+        {
+            return;
+        }
+
+        args.Add("--store", string.Join(",", stores));
+        args.AddIfPresent("--certificatestore", store.StoreName);
+
+        var folder = store.ExportFolder.Trim();
+
+        if (store.ExportPfx)
+        {
+            args.AddIfPresent("--pfxfilepath", folder);
+        }
+
+        if (store.ExportPem)
+        {
+            args.AddIfPresent("--pemfilespath", folder);
+        }
+
+        if (store.KeepExisting)
+        {
+            args.Add("--keepexisting");
+        }
     }
 
     /// <summary>

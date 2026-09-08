@@ -93,7 +93,8 @@ public sealed class WinAcmeInstaller(HttpClient? httpClient = null)
                 continue;
             }
 
-            var plugin = release.DnsPlugin(pluginId);
+            var plugin = release.DnsPlugin(
+                PluginCatalog.Find(pluginId)?.EffectiveDownloadName ?? pluginId);
 
             if (plugin is null)
             {

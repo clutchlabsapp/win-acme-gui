@@ -43,16 +43,25 @@ public sealed class ValidationPlugin
     public Func<ValuesLookup, IEnumerable<string>>? ExtraValidation { get; init; }
 
     /// <summary>
-    /// One argument that only this plugin contributes, used to tell from wacs.exe
-    /// --help output whether the plugin is installed. It has to be distinctive:
-    /// the Azure DNS plugin and the KeyVault store plugin share several arguments,
-    /// so matching on any of them would give a false positive.
+    /// The line wacs.exe --help prints for this plugin, which is how its presence is
+    /// detected. Matching arguments does not work: GoDaddy, DreamHost and DnsMadeEasy
+    /// all contribute --apikey, so any of them being installed would look like all of
+    /// them. The condition names the plugin itself and is unambiguous.
     /// </summary>
-    public string DetectionFlag { get; init; } = string.Empty;
+    /// <remarks>
+    /// A script-driven provider is not a win-acme plugin at all, so what appears in
+    /// help is the script plugin's own condition.
+    /// </remarks>
+    public string HelpCondition => $"--validation {(UsesScript ? "script" : Id)}";
 
-    /// <summary>The detection flag, falling back to the first field.</summary>
-    public string EffectiveDetectionFlag =>
-        DetectionFlag.Length > 0 ? "--" + DetectionFlag : Fields[0].Flag;
+    /// <summary>
+    /// The name in the release asset <c>plugin.validation.dns.&lt;name&gt;.v….zip</c>.
+    /// Usually the plugin id, but not always: Google Cloud DNS answers to
+    /// <c>--validation gcpdns</c> and ships as <c>googledns</c>.
+    /// </summary>
+    public string DownloadName { get; init; } = string.Empty;
+
+    public string EffectiveDownloadName => DownloadName.Length > 0 ? DownloadName : Id;
 
     public PluginField? FindField(string name) =>
         Fields.FirstOrDefault(f => string.Equals(f.Name, name, StringComparison.OrdinalIgnoreCase));

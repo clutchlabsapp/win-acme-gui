@@ -57,14 +57,18 @@ public class StagingTestTests
     }
 
     [Fact]
-    public void NeverTouchesTheMachineCertificateStore()
+    public void WritesTheCertificateNowhereAtAll()
     {
         var args = StagingArgs(FullyConfigured());
 
-        Assert.Equal("pfxfile", ValueAfter(args, "--store"));
+        Assert.Equal("none", ValueAfter(args, "--store"));
         Assert.DoesNotContain("--certificatestore", args);
         Assert.DoesNotContain("--keepexisting", args);
-        Assert.Equal(WacsArgumentBuilder.StagingCertificateFolder, ValueAfter(args, "--pfxfilepath"));
+
+        // The earlier version wrote a .pfx to a temp folder it never created, which
+        // failed on a real machine: win-acme requires the directory to exist.
+        Assert.DoesNotContain("--pfxfilepath", args);
+        Assert.DoesNotContain("--pemfilespath", args);
     }
 
     [Fact]

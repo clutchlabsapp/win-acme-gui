@@ -169,10 +169,10 @@ public class HttpValidationTests
     }
 
     [Fact]
-    public void DetectionFlagsStayUniqueAcrossEveryPlugin()
+    public void DetectionConditionsStayUniqueAcrossEveryPlugin()
     {
-        var flags = PluginCatalog.ValidationPlugins.Select(p => p.EffectiveDetectionFlag).ToList();
+        var conditions = PluginCatalog.ValidationPlugins.Select(p => p.HelpCondition).ToList();
 
-        Assert.Equal(flags.Count, flags.Distinct(StringComparer.OrdinalIgnoreCase).Count());
+        Assert.Equal(conditions.Count, conditions.Distinct(StringComparer.OrdinalIgnoreCase).Count());
     }
 }

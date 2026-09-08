@@ -24,7 +24,6 @@ public static class PluginCatalog
         new ValidationPlugin
         {
             Id = CloudflareId,
-            DetectionFlag = "cloudflareapitoken",
             DisplayName = "Cloudflare",
             Description = "Creates the _acme-challenge TXT record through the Cloudflare API.",
             Fields =
@@ -42,7 +41,6 @@ public static class PluginCatalog
         new ValidationPlugin
         {
             Id = Route53Id,
-            DetectionFlag = "route53iamrole",
             DisplayName = "Amazon Route 53",
             Description = "Creates the TXT record in Route 53. Use the instance IAM role where you can, "
                           + "and an access key pair otherwise.",
@@ -82,7 +80,6 @@ public static class PluginCatalog
         new ValidationPlugin
         {
             Id = AzureId,
-            DetectionFlag = "azuresubscriptionid",
             DisplayName = "Azure DNS",
             Description = "Creates the TXT record in an Azure DNS zone. Authenticate with a managed "
                           + "identity, or with an app registration's client id and secret.",
@@ -145,7 +142,6 @@ public static class PluginCatalog
         new ValidationPlugin
         {
             Id = NamecheapId,
-            DetectionFlag = "dnsscript",
             DisplayName = "Namecheap (via Fynydd.NameCheap)",
             Description = "Namecheap has no win-acme plugin. This drives Fynydd.NameCheap, a small "
                           + "helper program you build yourself, through win-acme's built-in script "
@@ -211,8 +207,102 @@ public static class PluginCatalog
         },
         new ValidationPlugin
         {
+            Id = "gcpdns",
+
+            // Answers to --validation gcpdns but ships as plugin.validation.dns.googledns.
+            DownloadName = "googledns",
+            DisplayName = "Google Cloud DNS",
+            Description = "Creates the TXT record in a Cloud DNS managed zone.",
+            Fields =
+            [
+                new PluginField
+                {
+                    Name = "serviceaccountkey",
+                    Label = "Service account key",
+                    Kind = PluginFieldKind.FilePath,
+                    Help = "The .json key file for a service account with the DNS Administrator role.",
+                },
+                new PluginField
+                {
+                    Name = "projectid",
+                    Label = "Project ID",
+                    Help = "The project that hosts the Cloud DNS zone.",
+                },
+            ],
+        },
+
+        new ValidationPlugin
+        {
+            Id = "godaddy",
+            DisplayName = "GoDaddy",
+            Description = "Creates the TXT record through the GoDaddy API.",
+            Fields =
+            [
+                new PluginField { Name = "apikey", Label = "API key", Kind = PluginFieldKind.Secret },
+                new PluginField { Name = "apisecret", Label = "API secret", Kind = PluginFieldKind.Secret },
+            ],
+        },
+
+        new ValidationPlugin
+        {
+            Id = "dnsmadeeasy",
+            DisplayName = "DNS Made Easy",
+            Description = "Creates the TXT record through the DNS Made Easy API.",
+            Fields =
+            [
+                new PluginField { Name = "apikey", Label = "API key", Kind = PluginFieldKind.Secret },
+                new PluginField { Name = "apisecret", Label = "API secret", Kind = PluginFieldKind.Secret },
+            ],
+        },
+
+        new ValidationPlugin
+        {
+            Id = "digitalocean",
+            DisplayName = "DigitalOcean",
+            Description = "Creates the TXT record through the DigitalOcean API.",
+            Fields =
+            [
+                new PluginField
+                {
+                    Name = "digitaloceanapitoken",
+                    Label = "API token",
+                    Kind = PluginFieldKind.Secret,
+                    Help = "A personal access token with write scope.",
+                },
+            ],
+        },
+
+        new ValidationPlugin
+        {
+            Id = "linode",
+            DisplayName = "Linode",
+            Description = "Creates the TXT record through the Linode API.",
+            Fields =
+            [
+                new PluginField
+                {
+                    Name = "apitoken",
+                    Label = "Personal access token",
+                    Kind = PluginFieldKind.Secret,
+                    Help = "Needs read/write access to Domains.",
+                },
+            ],
+        },
+
+        new ValidationPlugin
+        {
+            Id = "dreamhost",
+            DisplayName = "DreamHost",
+            Description = "Creates the TXT record through the DreamHost API.",
+            Fields =
+            [
+                new PluginField { Name = "apikey", Label = "API key", Kind = PluginFieldKind.Secret },
+            ],
+        },
+
+        new ValidationPlugin
+        {
             Id = SelfHostingId,
-            DetectionFlag = "validationport",
             DisplayName = "Self-hosting (win-acme answers on port 80)",
             ValidationMode = HttpChallenge,
             RequiresSeparateDownload = false,
@@ -240,7 +330,6 @@ public static class PluginCatalog
         new ValidationPlugin
         {
             Id = FileSystemId,
-            DetectionFlag = "webroot",
             DisplayName = "File system (write the challenge to a web root)",
             ValidationMode = HttpChallenge,
             RequiresSeparateDownload = false,
