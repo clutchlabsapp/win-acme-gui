@@ -13,6 +13,9 @@ public enum PluginFieldKind
 
     /// <summary>A path to a file on disk, shown with a Browse button.</summary>
     FilePath,
+
+    /// <summary>A path to a folder on disk, shown with a Browse button.</summary>
+    FolderPath,
 }
 
 /// <summary>Where a field's value ends up.</summary>

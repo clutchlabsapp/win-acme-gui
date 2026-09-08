@@ -38,9 +38,11 @@ public class PluginCatalogTests
     }
 
     [Fact]
-    public void EveryPluginUsesDnsValidation()
+    public void EveryPluginNamesAChallengeWinAcmeUnderstands()
     {
-        Assert.All(PluginCatalog.ValidationPlugins, p => Assert.Equal("dns-01", p.ValidationMode));
+        Assert.All(
+            PluginCatalog.ValidationPlugins,
+            p => Assert.Contains(p.ValidationMode, new[] { "dns-01", "http-01" }));
     }
 
     [Fact]
