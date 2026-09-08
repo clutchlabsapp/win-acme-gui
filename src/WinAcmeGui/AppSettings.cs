@@ -38,6 +38,12 @@ public sealed class AppSettings
 
     public bool KeepExisting { get; set; }
 
+    public bool ExportPfx { get; set; }
+
+    public bool ExportPem { get; set; }
+
+    public string ExportFolder { get; set; } = string.Empty;
+
     /// <summary>Post-renewal hooks. Nothing in here is a credential.</summary>
     public InstallationSettings Installation { get; set; } = new();
 

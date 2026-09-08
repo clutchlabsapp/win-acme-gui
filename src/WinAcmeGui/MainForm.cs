@@ -41,6 +41,10 @@ public sealed class MainForm : Form
     private readonly ComboBox _storeName = new() { DropDownStyle = ComboBoxStyle.DropDown };
     private readonly CheckBox _keepExisting = new() { Text = "Keep the previous certificate when renewing", AutoSize = true };
 
+    private readonly CheckBox _exportPfx = new() { Text = "Export a .pfx file", AutoSize = true };
+    private readonly CheckBox _exportPem = new() { Text = "Export .pem files", AutoSize = true };
+    private readonly TextBox _exportFolder = Ui.Text();
+
     private readonly CheckBox _updateIis = new() { Text = "Rebind IIS https bindings to the new certificate", AutoSize = true };
     private readonly TextBox _iisSiteId = Ui.Text();
     private readonly TextBox _sslPort = Ui.Text();
@@ -110,7 +114,7 @@ public sealed class MainForm : Form
 
         _tabs.TabPages.AddRange(
         [
-            Ui.Page("win-acme", BuildWinAcmeGroup(), BuildAccountGroup()),
+            Ui.Page("win-acme", BuildWinAcmeGroup(), BuildAccountGroup(), BuildExportGroup()),
             Ui.Page("Validation", BuildValidationGroup()),
             Ui.Page("Certificate", BuildCertificateGroup(), BuildStoreGroup()),
             Ui.Page("After renewal", BuildInstallationGroup()),
@@ -171,6 +175,77 @@ public sealed class MainForm : Form
         Ui.AddFullWidth(grid, actions);
 
         return Ui.Group("win-acme", grid);
+    }
+
+    /// <summary>
+    /// Optional file exports. Both formats share one folder, which is created before a
+    /// run if it does not exist — win-acme refuses a path that is not already there.
+    /// </summary>
+    private GroupBox BuildExportGroup()
+    {
+        var grid = Ui.Grid();
+
+        _exportPfx.CheckedChanged += OnExportChanged;
+        _exportPem.CheckedChanged += OnExportChanged;
+        _exportFolder.TextChanged += OnInputChanged;
+
+        Ui.AddFullWidth(grid, _exportPfx);
+        Ui.AddFullWidth(grid, _exportPem);
+
+        var row = new TableLayoutPanel
+        {
+            ColumnCount = 2,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+            Margin = Padding.Empty,
+        };
+
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+        row.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+
+        _exportFolder.Dock = DockStyle.Fill;
+        row.Controls.Add(_exportFolder, 0, 0);
+        row.Controls.Add(Ui.Button("Browse...", OnBrowseExportFolder), 1, 0);
+
+        Ui.AddRow(grid, "Output folder", row,
+            "Used by both formats. These files hold the private key and are written without a "
+            + "password, so restrict who can read the folder.");
+
+        return Ui.Group("Certificate files (optional)", grid);
+    }
+
+    private void OnExportChanged(object? sender, EventArgs e)
+    {
+        UpdateExportControls();
+        RefreshPreview();
+    }
+
+    private void UpdateExportControls()
+    {
+        var wanted = _exportPfx.Checked || _exportPem.Checked;
+
+        _exportFolder.Enabled = wanted;
+        _exportFolder.BackColor = wanted ? SystemColors.Window : SystemColors.Control;
+    }
+
+    private void OnBrowseExportFolder(object? sender, EventArgs e)
+    {
+        using var dialog = new FolderBrowserDialog
+        {
+            Description = "Where should the exported certificate files be written?",
+            UseDescriptionForTitle = true,
+        };
+
+        var current = _exportFolder.Text.Trim();
+        if (current.Length > 0 && Directory.Exists(current))
+        {
+            dialog.SelectedPath = current;
+        }
+
+        if (dialog.ShowDialog(this) == DialogResult.OK)
+        {
+            _exportFolder.Text = dialog.SelectedPath;
+        }
     }
 
     private GroupBox BuildAccountGroup()
@@ -423,6 +498,10 @@ public sealed class MainForm : Form
         _hostNames.Text = string.Join(Environment.NewLine, _settings.HostNames);
         _storeName.Text = _settings.CertificateStoreName;
         _keepExisting.Checked = _settings.KeepExisting;
+        _exportPfx.Checked = _settings.ExportPfx;
+        _exportPem.Checked = _settings.ExportPem;
+        _exportFolder.Text = _settings.ExportFolder;
+        UpdateExportControls();
 
         _updateIis.Checked = _settings.Installation.UpdateIisBindings;
         _iisSiteId.Text = _settings.Installation.IisSiteId;
@@ -479,6 +558,9 @@ public sealed class MainForm : Form
         _settings.HostNames = definition.Certificate.HostNames;
         _settings.CertificateStoreName = definition.Store.StoreName;
         _settings.KeepExisting = definition.Store.KeepExisting;
+        _settings.ExportPfx = definition.Store.ExportPfx;
+        _settings.ExportPem = definition.Store.ExportPem;
+        _settings.ExportFolder = definition.Store.ExportFolder;
         _settings.Installation = definition.Installation;
         _settings.RememberValidationValues(definition.Validation);
 
@@ -505,6 +587,9 @@ public sealed class MainForm : Form
             {
                 StoreName = _storeName.Text.Trim(),
                 KeepExisting = _keepExisting.Checked,
+                ExportPfx = _exportPfx.Checked,
+                ExportPem = _exportPem.Checked,
+                ExportFolder = _exportFolder.Text.Trim(),
             },
             Installation = new InstallationSettings
             {
@@ -741,6 +826,12 @@ public sealed class MainForm : Form
         }
 
         SaveSettings();
+
+        if (!EnsureExportFolder(definition))
+        {
+            return;
+        }
+
         await WithBusyAsync("Creating renewal", token => RunAndLogAsync(command, token));
     }
 
@@ -838,6 +929,11 @@ public sealed class MainForm : Form
             return;
         }
 
+        if (!EnsureExportFolder(CurrentDefinition()))
+        {
+            return;
+        }
+
         var command = WacsArgumentBuilder.BuildRenewNow(
             WacsPathOrDefault(),
             friendlyName: friendlyName.Length > 0 ? friendlyName : null,
@@ -898,6 +994,40 @@ public sealed class MainForm : Form
             : $"{problems[0]}  (+{problems.Count - 1} more on Verify and run)";
 
         _statusLabel.ForeColor = Color.Firebrick;
+    }
+
+    /// <summary>
+    /// Creates the export folder if it is missing. win-acme refuses a path that does
+    /// not already exist — the failure that made the first dry run abort at the store
+    /// step — and there is no reason to send the user off to make a directory by hand.
+    /// </summary>
+    private bool EnsureExportFolder(RenewalDefinition definition)
+    {
+        var store = definition.Store;
+
+        if (!store.ExportsFiles || store.ExportFolder.Length == 0 || Directory.Exists(store.ExportFolder))
+        {
+            return true;
+        }
+
+        try
+        {
+            Directory.CreateDirectory(store.ExportFolder);
+            AppendLog($"Created the export folder {store.ExportFolder}.");
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException)
+        {
+            MessageBox.Show(
+                this,
+                $"Could not create the export folder:{Environment.NewLine}{Environment.NewLine}"
+                + $"{store.ExportFolder}{Environment.NewLine}{Environment.NewLine}{exception.Message}",
+                "Export folder",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+
+            return false;
+        }
     }
 
     // ------------------------------------------------------ namecheap helper
