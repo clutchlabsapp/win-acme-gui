@@ -26,10 +26,15 @@ public sealed class MainForm : Form
     private readonly TextBox _commonName = Ui.Text();
     private readonly TextBox _hostNames = Ui.Text(multiline: true, height: 90);
 
+    private readonly ComboBox _challengeMode = new() { DropDownStyle = ComboBoxStyle.DropDownList };
+
     private readonly ComboBox _validationPlugin = new()
     {
         DropDownStyle = ComboBoxStyle.DropDownList,
     };
+
+    /// <summary>The plugins currently listed, so the dropdown index means something.</summary>
+    private readonly List<ValidationPlugin> _shownPlugins = [];
 
     private readonly PluginFieldPanel _pluginFields = new();
 
@@ -206,12 +211,15 @@ public sealed class MainForm : Form
     {
         var grid = Ui.Grid();
 
-        _validationPlugin.Items.AddRange([.. PluginCatalog.ValidationPlugins.Select(p => (object)p.DisplayName)]);
+        _challengeMode.Items.AddRange(["DNS (dns-01)", "HTTP (http-01)"]);
+        _challengeMode.SelectedIndexChanged += OnChallengeModeChanged;
         _validationPlugin.SelectedIndexChanged += OnValidationPluginChanged;
         _pluginFields.ValuesChanged += OnInputChanged;
 
-        Ui.AddRow(grid, "DNS provider", _validationPlugin,
-            "DNS validation is used throughout: it works for wildcards and needs no inbound HTTP.");
+        Ui.AddRow(grid, "Challenge", _challengeMode,
+            "DNS works for wildcards and needs no inbound HTTP. HTTP needs the ACME server to reach "
+            + "this machine on port 80, and cannot issue wildcards.");
+        Ui.AddRow(grid, "Provider", _validationPlugin);
         Ui.AddFullWidth(grid, _pluginFields);
 
         _saveCredentials = Ui.Button("Save credentials to appsettings.json", OnSaveNamecheapCredentials);
@@ -353,12 +361,46 @@ public sealed class MainForm : Form
 
     // ---------------------------------------------------------------- state
 
-    private static ValidationPlugin? PluginAt(int index) =>
-        index >= 0 && index < PluginCatalog.ValidationPlugins.Count
-            ? PluginCatalog.ValidationPlugins[index]
+    private ValidationPlugin? SelectedPlugin =>
+        _validationPlugin.SelectedIndex >= 0 && _validationPlugin.SelectedIndex < _shownPlugins.Count
+            ? _shownPlugins[_validationPlugin.SelectedIndex]
             : null;
 
-    private ValidationPlugin? SelectedPlugin => PluginAt(_validationPlugin.SelectedIndex);
+    private string SelectedChallenge =>
+        _challengeMode.SelectedIndex == 1 ? PluginCatalog.HttpChallenge : PluginCatalog.DnsChallenge;
+
+    /// <summary>
+    /// Rebuilds the provider list for the chosen challenge, keeping the current
+    /// provider selected when it offers that challenge too.
+    /// </summary>
+    private void ShowProvidersFor(string challenge, string? preferredId)
+    {
+        _shownPlugins.Clear();
+        _shownPlugins.AddRange(PluginCatalog.ForChallenge(challenge));
+
+        var wasLoading = _loading;
+        _loading = true;
+
+        try
+        {
+            _validationPlugin.Items.Clear();
+            _validationPlugin.Items.AddRange([.. _shownPlugins.Select(p => (object)p.DisplayName)]);
+
+            var index = _shownPlugins.FindIndex(
+                p => string.Equals(p.Id, preferredId, StringComparison.OrdinalIgnoreCase));
+
+            _validationPlugin.SelectedIndex = _shownPlugins.Count == 0 ? -1 : Math.Max(index, 0);
+        }
+        finally
+        {
+            _loading = wasLoading;
+        }
+
+        OnValidationPluginChanged(this, EventArgs.Empty);
+    }
+
+    private void OnChallengeModeChanged(object? sender, EventArgs e) =>
+        ShowProvidersFor(SelectedChallenge, SelectedPlugin?.Id);
 
     private InstallationScriptPreset SelectedScriptPreset =>
         _scriptPreset.SelectedIndex >= 0 && _scriptPreset.SelectedIndex < InstallationPresets.Scripts.Count
@@ -402,11 +444,13 @@ public sealed class MainForm : Form
 
         UpdateScriptControls();
 
-        var index = PluginCatalog.ValidationPlugins
-            .ToList()
-            .FindIndex(p => string.Equals(p.Id, _settings.ValidationPluginId, StringComparison.OrdinalIgnoreCase));
+        var remembered = PluginCatalog.Find(_settings.ValidationPluginId);
+        var challenge = remembered?.ValidationMode ?? PluginCatalog.DnsChallenge;
 
-        _validationPlugin.SelectedIndex = index >= 0 ? index : 0;
+        _challengeMode.SelectedIndex =
+            string.Equals(challenge, PluginCatalog.HttpChallenge, StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+
+        ShowProvidersFor(challenge, remembered?.Id);
         UpdateCredentialActions();
 
         // Selecting the plugin above fires the changed handler, which draws the fields;
