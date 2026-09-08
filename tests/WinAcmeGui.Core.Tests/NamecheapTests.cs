@@ -130,7 +130,9 @@ public class NamecheapTests : IDisposable
 
         Assert.False(plugin.RequiresSeparateDownload);
         Assert.True(plugin.UsesScript);
-        Assert.Equal("--dnsscript", plugin.EffectiveDetectionFlag);
+        // Detected by the script plugin's condition, because that is what win-acme
+        // actually runs — there is no --validation namecheap.
+        Assert.Equal("--validation script", plugin.HelpCondition);
     }
 
     [Fact]

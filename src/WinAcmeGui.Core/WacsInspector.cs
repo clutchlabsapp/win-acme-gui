@@ -88,8 +88,9 @@ public sealed partial class WacsInspector(IWacsRunner runner)
     }
 
     /// <summary>
-    /// Each loaded plugin adds its own command line arguments, so the presence of a
-    /// plugin's flags in --help output is proof that win-acme can actually use it.
+    /// wacs.exe --help lists every loaded plugin with the condition that selects it,
+    /// for example <c>[--validation godaddy]</c>. Finding that line is proof win-acme
+    /// can actually use the plugin.
     /// </summary>
     public static IReadOnlyCollection<string> ReadAvailablePlugins(string? helpOutput)
     {
@@ -99,8 +100,7 @@ public sealed partial class WacsInspector(IWacsRunner runner)
         }
 
         return PluginCatalog.ValidationPlugins
-            .Where(plugin => helpOutput.Contains(
-                plugin.EffectiveDetectionFlag, StringComparison.OrdinalIgnoreCase))
+            .Where(plugin => helpOutput.Contains(plugin.HelpCondition, StringComparison.OrdinalIgnoreCase))
             .Select(plugin => plugin.Id)
             .ToArray();
     }
