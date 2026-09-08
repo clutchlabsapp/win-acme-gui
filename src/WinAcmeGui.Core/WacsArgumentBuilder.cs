@@ -36,13 +36,7 @@ public static class WacsArgumentBuilder
         // Validation.
         AddValidation(args, definition.Validation);
 
-        // Store.
-        args.AddIfPresent("--store", definition.Store.PluginId);
-        args.AddIfPresent("--certificatestore", definition.Store.StoreName);
-        if (definition.Store.KeepExisting)
-        {
-            args.Add("--keepexisting");
-        }
+        AddStore(args, definition.Store);
 
         // Always say something about installation, otherwise win-acme may fall back
         // to its interactive prompt and the run hangs with nobody to answer it.
@@ -212,6 +206,63 @@ public static class WacsArgumentBuilder
         args.Add("--verbose");
 
         return new WacsCommand(wacsPath, args.ToArray());
+    }
+
+    /// <summary>
+    /// Where the certificate is saved. win-acme accepts a comma-separated list of
+    /// store plugins, so the file exports are added alongside the Windows certificate
+    /// store rather than replacing it — IIS bindings and the RD and Exchange scripts
+    /// all read the certificate back out of that store, and dropping it would break
+    /// every post-renewal hook.
+    /// </summary>
+    private static void AddStore(ArgumentList args, StoreSettings store)
+    {
+        if (string.Equals(store.PluginId, NoStore, StringComparison.OrdinalIgnoreCase))
+        {
+            args.Add("--store", NoStore);
+            return;
+        }
+
+        var stores = new List<string>();
+        if (!string.IsNullOrWhiteSpace(store.PluginId))
+        {
+            stores.Add(store.PluginId.Trim());
+        }
+
+        if (store.ExportPfx)
+        {
+            stores.Add("pfxfile");
+        }
+
+        if (store.ExportPem)
+        {
+            stores.Add("pemfiles");
+        }
+
+        if (stores.Count == 0)
+        {
+            return;
+        }
+
+        args.Add("--store", string.Join(",", stores));
+        args.AddIfPresent("--certificatestore", store.StoreName);
+
+        var folder = store.ExportFolder.Trim();
+
+        if (store.ExportPfx)
+        {
+            args.AddIfPresent("--pfxfilepath", folder);
+        }
+
+        if (store.ExportPem)
+        {
+            args.AddIfPresent("--pemfilespath", folder);
+        }
+
+        if (store.KeepExisting)
+        {
+            args.Add("--keepexisting");
+        }
     }
 
     /// <summary>
