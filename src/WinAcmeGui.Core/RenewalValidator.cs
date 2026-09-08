@@ -18,6 +18,7 @@ public static class RenewalValidator
         ValidateCertificate(definition.Certificate, problems);
         ValidateAccount(definition.Account, problems);
         ValidateValidation(definition.Validation, problems);
+        ValidateChallengeSuitsHostNames(definition, problems);
         ValidateInstallation(definition.Installation, definition.Store, problems);
 
         return problems;
@@ -88,6 +89,27 @@ public static class RenewalValidator
         if (plugin.ExtraValidation is not null)
         {
             problems.AddRange(plugin.ExtraValidation(new ValuesLookup(validation.Values)));
+        }
+    }
+
+    /// <summary>
+    /// Let's Encrypt only issues wildcards over dns-01. Picking HTTP validation for a
+    /// wildcard fails when the order is submitted, well after everything looks fine.
+    /// </summary>
+    private static void ValidateChallengeSuitsHostNames(RenewalDefinition definition, List<string> problems)
+    {
+        var plugin = PluginCatalog.Find(definition.Validation.PluginId);
+        if (plugin is null || !string.Equals(plugin.ValidationMode, PluginCatalog.HttpChallenge, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        var wildcards = definition.Certificate.HostNames.Where(HostNameParser.IsWildcard).ToList();
+        if (wildcards.Count > 0)
+        {
+            problems.Add(
+                $"{string.Join(", ", wildcards)} needs DNS validation. Wildcard certificates cannot be "
+                + "issued with an HTTP challenge.");
         }
     }
 

@@ -26,10 +26,15 @@ public sealed class MainForm : Form
     private readonly TextBox _commonName = Ui.Text();
     private readonly TextBox _hostNames = Ui.Text(multiline: true, height: 90);
 
+    private readonly ComboBox _challengeMode = new() { DropDownStyle = ComboBoxStyle.DropDownList };
+
     private readonly ComboBox _validationPlugin = new()
     {
         DropDownStyle = ComboBoxStyle.DropDownList,
     };
+
+    /// <summary>The plugins currently listed, so the dropdown index means something.</summary>
+    private readonly List<ValidationPlugin> _shownPlugins = [];
 
     private readonly PluginFieldPanel _pluginFields = new();
 
@@ -61,6 +66,9 @@ public sealed class MainForm : Form
 
     private Button _browseScript = null!;
     private Button _installButton = null!;
+    private TabControl _tabs = null!;
+    private StatusStrip _statusStrip = null!;
+    private ToolStripStatusLabel _statusLabel = null!;
     private Button _saveCredentials = null!;
     private Button _reloadCredentials = null!;
     private FlowLayoutPanel _credentialActions = null!;
@@ -77,8 +85,10 @@ public sealed class MainForm : Form
     public MainForm()
     {
         Text = "win-acme GUI";
-        MinimumSize = new Size(780, 620);
-        Size = new Size(940, 800);
+        // Sized for the tallest tab — Azure DNS has seven fields, After renewal six —
+        // so no page needs its scrollbar at a normal font scale.
+        MinimumSize = new Size(720, 560);
+        Size = new Size(880, 700);
         StartPosition = FormStartPosition.CenterScreen;
 
         BuildUi();
@@ -88,57 +98,37 @@ public sealed class MainForm : Form
         RefreshPreview();
     }
 
+    /// <summary>
+    /// Five tabs following the order of the job: set win-acme up, choose how ownership
+    /// is proved, say what the certificate covers, say what happens afterwards, then
+    /// verify and run.
+    /// </summary>
     private void BuildUi()
     {
-        var root = new TableLayoutPanel
+        _tabs = new TabControl { Dock = DockStyle.Fill };
+
+        _tabs.TabPages.AddRange(
+        [
+            Ui.Page("win-acme", BuildWinAcmeGroup(), BuildAccountGroup()),
+            Ui.Page("Validation", BuildValidationGroup()),
+            Ui.Page("Certificate", BuildCertificateGroup(), BuildStoreGroup()),
+            Ui.Page("After renewal", BuildInstallationGroup()),
+            Ui.FillPage("Verify and run", BuildActionArea()),
+        ]);
+
+        // Problems are raised on any tab but only listed on the last one, so a
+        // one-line summary stays visible from everywhere.
+        _statusStrip = new StatusStrip { SizingGrip = false };
+        _statusLabel = new ToolStripStatusLabel
         {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 2,
-            Padding = new Padding(Ui.Gap),
+            Spring = true,
+            TextAlign = ContentAlignment.MiddleLeft,
         };
 
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 62f));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 38f));
+        _statusStrip.Items.Add(_statusLabel);
 
-        root.Controls.Add(BuildSettingsArea(), 0, 0);
-        root.Controls.Add(BuildActionArea(), 0, 1);
-
-        Controls.Add(root);
-    }
-
-    private Control BuildSettingsArea()
-    {
-        var stack = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            ColumnCount = 1,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-        };
-
-        stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-
-        foreach (var group in new[]
-        {
-            BuildWinAcmeGroup(),
-            BuildAccountGroup(),
-            BuildCertificateGroup(),
-            BuildValidationGroup(),
-            BuildStoreGroup(),
-            BuildInstallationGroup(),
-            BuildPreviewGroup(),
-        })
-        {
-            stack.Controls.Add(group, 0, stack.RowCount);
-            stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            stack.RowCount++;
-        }
-
-        var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
-        scroller.Controls.Add(stack);
-        return scroller;
+        Controls.Add(_tabs);
+        Controls.Add(_statusStrip);
     }
 
     private GroupBox BuildWinAcmeGroup()
@@ -223,12 +213,15 @@ public sealed class MainForm : Form
     {
         var grid = Ui.Grid();
 
-        _validationPlugin.Items.AddRange([.. PluginCatalog.ValidationPlugins.Select(p => (object)p.DisplayName)]);
+        _challengeMode.Items.AddRange(["DNS (dns-01)", "HTTP (http-01)"]);
+        _challengeMode.SelectedIndexChanged += OnChallengeModeChanged;
         _validationPlugin.SelectedIndexChanged += OnValidationPluginChanged;
         _pluginFields.ValuesChanged += OnInputChanged;
 
-        Ui.AddRow(grid, "DNS provider", _validationPlugin,
-            "DNS validation is used throughout: it works for wildcards and needs no inbound HTTP.");
+        Ui.AddRow(grid, "Challenge", _challengeMode,
+            "DNS works for wildcards and needs no inbound HTTP. HTTP needs the ACME server to reach "
+            + "this machine on port 80, and cannot issue wildcards.");
+        Ui.AddRow(grid, "Provider", _validationPlugin);
         Ui.AddFullWidth(grid, _pluginFields);
 
         _saveCredentials = Ui.Button("Save credentials to appsettings.json", OnSaveNamecheapCredentials);
@@ -370,12 +363,46 @@ public sealed class MainForm : Form
 
     // ---------------------------------------------------------------- state
 
-    private static ValidationPlugin? PluginAt(int index) =>
-        index >= 0 && index < PluginCatalog.ValidationPlugins.Count
-            ? PluginCatalog.ValidationPlugins[index]
+    private ValidationPlugin? SelectedPlugin =>
+        _validationPlugin.SelectedIndex >= 0 && _validationPlugin.SelectedIndex < _shownPlugins.Count
+            ? _shownPlugins[_validationPlugin.SelectedIndex]
             : null;
 
-    private ValidationPlugin? SelectedPlugin => PluginAt(_validationPlugin.SelectedIndex);
+    private string SelectedChallenge =>
+        _challengeMode.SelectedIndex == 1 ? PluginCatalog.HttpChallenge : PluginCatalog.DnsChallenge;
+
+    /// <summary>
+    /// Rebuilds the provider list for the chosen challenge, keeping the current
+    /// provider selected when it offers that challenge too.
+    /// </summary>
+    private void ShowProvidersFor(string challenge, string? preferredId)
+    {
+        _shownPlugins.Clear();
+        _shownPlugins.AddRange(PluginCatalog.ForChallenge(challenge));
+
+        var wasLoading = _loading;
+        _loading = true;
+
+        try
+        {
+            _validationPlugin.Items.Clear();
+            _validationPlugin.Items.AddRange([.. _shownPlugins.Select(p => (object)p.DisplayName)]);
+
+            var index = _shownPlugins.FindIndex(
+                p => string.Equals(p.Id, preferredId, StringComparison.OrdinalIgnoreCase));
+
+            _validationPlugin.SelectedIndex = _shownPlugins.Count == 0 ? -1 : Math.Max(index, 0);
+        }
+        finally
+        {
+            _loading = wasLoading;
+        }
+
+        OnValidationPluginChanged(this, EventArgs.Empty);
+    }
+
+    private void OnChallengeModeChanged(object? sender, EventArgs e) =>
+        ShowProvidersFor(SelectedChallenge, SelectedPlugin?.Id);
 
     private InstallationScriptPreset SelectedScriptPreset =>
         _scriptPreset.SelectedIndex >= 0 && _scriptPreset.SelectedIndex < InstallationPresets.Scripts.Count
@@ -419,11 +446,13 @@ public sealed class MainForm : Form
 
         UpdateScriptControls();
 
-        var index = PluginCatalog.ValidationPlugins
-            .ToList()
-            .FindIndex(p => string.Equals(p.Id, _settings.ValidationPluginId, StringComparison.OrdinalIgnoreCase));
+        var remembered = PluginCatalog.Find(_settings.ValidationPluginId);
+        var challenge = remembered?.ValidationMode ?? PluginCatalog.DnsChallenge;
 
-        _validationPlugin.SelectedIndex = index >= 0 ? index : 0;
+        _challengeMode.SelectedIndex =
+            string.Equals(challenge, PluginCatalog.HttpChallenge, StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+
+        ShowProvidersFor(challenge, remembered?.Id);
         UpdateCredentialActions();
 
         // Selecting the plugin above fires the changed handler, which draws the fields;
@@ -586,6 +615,8 @@ public sealed class MainForm : Form
         _problems.Text = problems.Count == 0
             ? string.Empty
             : string.Join(Environment.NewLine, problems.Select(p => "• " + p));
+
+        ShowProblemSummary(problems);
 
         _preview.Text = WacsArgumentBuilder
             .BuildCreateRenewal(wacsPath.Length == 0 ? "wacs.exe" : wacsPath, definition)
@@ -771,6 +802,26 @@ public sealed class MainForm : Form
                 ? "Everything checks out: these certificates will renew automatically."
                 : "Some checks did not pass. Fix the items marked FAIL above.");
         });
+    }
+
+    /// <summary>
+    /// Keeps the bottom strip in step with the problem list, so an error raised on one
+    /// tab is still visible while looking at another.
+    /// </summary>
+    private void ShowProblemSummary(IReadOnlyList<string> problems)
+    {
+        if (problems.Count == 0)
+        {
+            _statusLabel.Text = "Ready.";
+            _statusLabel.ForeColor = SystemColors.ControlText;
+            return;
+        }
+
+        _statusLabel.Text = problems.Count == 1
+            ? problems[0]
+            : $"{problems[0]}  (+{problems.Count - 1} more on Verify and run)";
+
+        _statusLabel.ForeColor = Color.Firebrick;
     }
 
     // ------------------------------------------------------ namecheap helper

@@ -10,6 +10,11 @@ public static class PluginCatalog
     public const string Route53Id = "route53";
     public const string AzureId = "azure";
     public const string NamecheapId = "namecheap";
+    public const string SelfHostingId = "selfhosting";
+    public const string FileSystemId = "filesystem";
+
+    public const string DnsChallenge = "dns-01";
+    public const string HttpChallenge = "http-01";
 
     /// <summary>Where to get the Namecheap helper, since it has no published binary.</summary>
     public const string NamecheapHelperUrl = "https://github.com/fynydd/Fynydd.NameCheap";
@@ -204,7 +209,75 @@ public static class PluginCatalog
                 },
             ],
         },
+        new ValidationPlugin
+        {
+            Id = SelfHostingId,
+            DetectionFlag = "validationport",
+            DisplayName = "Self-hosting (win-acme answers on port 80)",
+            ValidationMode = HttpChallenge,
+            RequiresSeparateDownload = false,
+            Description = "win-acme serves the challenge itself. Nothing to configure, but the ACME "
+                          + "server must be able to reach this machine on port 80 from the internet.",
+            Fields =
+            [
+                new PluginField
+                {
+                    Name = "validationport",
+                    Label = "Listen port",
+                    Required = false,
+                    Help = "Blank means 80. Only change this if something forwards port 80 here.",
+                },
+                new PluginField
+                {
+                    Name = "validationprotocol",
+                    Label = "Protocol",
+                    Required = false,
+                    Help = "Blank means http. Set to https only if redirects happen before requests reach you.",
+                },
+            ],
+        },
+
+        new ValidationPlugin
+        {
+            Id = FileSystemId,
+            DetectionFlag = "webroot",
+            DisplayName = "File system (write the challenge to a web root)",
+            ValidationMode = HttpChallenge,
+            RequiresSeparateDownload = false,
+            Description = "Writes the challenge file into a folder your existing web server already "
+                          + "serves. Nothing new listens on port 80.",
+            Fields =
+            [
+                new PluginField
+                {
+                    Name = "webroot",
+                    Label = "Web root",
+                    Kind = PluginFieldKind.FolderPath,
+                    Help = "The folder served at the site root; win-acme writes into .well-known below it.",
+                },
+                new PluginField
+                {
+                    Name = "validationsiteid",
+                    Label = "IIS site ID",
+                    Required = false,
+                    Help = "Optional. Lets win-acme work the web root out from an IIS site instead.",
+                },
+                new PluginField
+                {
+                    Name = "manualtargetisiis",
+                    Label = "Copy the default web.config",
+                    Kind = PluginFieldKind.Boolean,
+                    Required = false,
+                    Help = "Tick on IIS, which otherwise refuses to serve the extensionless challenge file.",
+                },
+            ],
+        },
     ];
+
+    /// <summary>Plugins offering the given challenge, for the mode selector.</summary>
+    public static IReadOnlyList<ValidationPlugin> ForChallenge(string challenge) =>
+        [.. ValidationPlugins.Where(p =>
+            string.Equals(p.ValidationMode, challenge, StringComparison.OrdinalIgnoreCase))];
 
     public static ValidationPlugin? Find(string? id) =>
         ValidationPlugins.FirstOrDefault(p => string.Equals(p.Id, id, StringComparison.OrdinalIgnoreCase));
