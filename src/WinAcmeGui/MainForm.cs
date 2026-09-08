@@ -66,6 +66,7 @@ public sealed class MainForm : Form
 
     private Button _browseScript = null!;
     private Button _installButton = null!;
+    private Button _stagingButton = null!;
     private TabControl _tabs = null!;
     private StatusStrip _statusStrip = null!;
     private ToolStripStatusLabel _statusLabel = null!;
@@ -330,6 +331,7 @@ public sealed class MainForm : Form
         area.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
 
         _createButton = Ui.Button("Create renewal", OnCreateRenewal, isDefault: true);
+        _stagingButton = Ui.Button("Test against staging", OnStagingTest);
         _checkButton = Ui.Button("Check setup", OnCheckSetup);
         _renewButton = Ui.Button("Renew now", OnRenewNow);
         _cancelButton = Ui.Button("Stop", OnStop);
@@ -346,6 +348,7 @@ public sealed class MainForm : Form
 
         buttons.Controls.AddRange(
         [
+            _stagingButton,
             _createButton,
             _checkButton,
             _renewButton,
@@ -624,6 +627,7 @@ public sealed class MainForm : Form
 
         var idle = _running is null;
         _createButton.Enabled = idle && problems.Count == 0;
+        _stagingButton.Enabled = idle && problems.Count == 0;
         _installButton.Enabled = idle;
         _checkButton.Enabled = idle;
         _renewButton.Enabled = idle && wacsPath.Length > 0;
@@ -738,6 +742,78 @@ public sealed class MainForm : Form
 
         SaveSettings();
         await WithBusyAsync("Creating renewal", token => RunAndLogAsync(command, token));
+    }
+
+    /// <summary>
+    /// Proves the whole path against staging, then removes the renewal it created.
+    /// </summary>
+    private async void OnStagingTest(object? sender, EventArgs e)
+    {
+        var definition = CurrentDefinition();
+        var stagingName = WacsArgumentBuilder.StagingFriendlyName(definition);
+
+        var confirmed = MessageBox.Show(
+            this,
+            string.Join(Environment.NewLine,
+            [
+                "Request a test certificate from the Let's Encrypt STAGING server for:",
+                string.Empty,
+                string.Join(", ", definition.Certificate.HostNames),
+                string.Empty,
+                "This really does create and then delete DNS records through your provider —",
+                "that is what makes it a useful test of your credentials.",
+                string.Empty,
+                "It will not touch your certificate store, will not run your post-renewal",
+                "hooks, and the temporary renewal is removed afterwards. Staging",
+                "certificates are not trusted by browsers and are not rate limited.",
+            ]),
+            "Test against staging",
+            MessageBoxButtons.OKCancel,
+            MessageBoxIcon.Question);
+
+        if (confirmed != DialogResult.OK)
+        {
+            return;
+        }
+
+        await WithBusyAsync("Testing against staging", async token =>
+        {
+            try
+            {
+                await RunAndLogAsync(
+                        WacsArgumentBuilder.BuildStagingTest(WacsPathOrDefault(), definition), token)
+                    .ConfigureAwait(true);
+            }
+            finally
+            {
+                // Always, including after a failure or a stop: a leftover staging
+                // renewal would be picked up by the scheduled task forever.
+                await RemoveStagingRenewalAsync(stagingName).ConfigureAwait(true);
+            }
+        }).ConfigureAwait(true);
+    }
+
+    private async Task RemoveStagingRenewalAsync(string stagingName)
+    {
+        AppendLog(string.Empty);
+        AppendLog($"Removing the temporary renewal '{stagingName}'...");
+
+        try
+        {
+            // A fresh token: cleanup still has to happen when the run was cancelled.
+            var result = await _runner
+                .RunAsync(WacsArgumentBuilder.BuildCancelRenewal(WacsPathOrDefault(), stagingName))
+                .ConfigureAwait(true);
+
+            AppendLog(result.Succeeded
+                ? "Temporary renewal removed."
+                : $"Could not remove it (exit code {result.ExitCode}). Run: wacs.exe --cancel "
+                  + $"--friendlyname \"{stagingName}\"");
+        }
+        catch (Exception exception)
+        {
+            AppendLog($"Could not remove the temporary renewal: {exception.Message}");
+        }
     }
 
     private async void OnRenewNow(object? sender, EventArgs e)

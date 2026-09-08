@@ -61,6 +61,111 @@ public static class WacsArgumentBuilder
         return new WacsCommand(wacsPath, args.ToArray());
     }
 
+    /// <summary>Suffix marking a renewal as belonging to a dry run rather than a real one.</summary>
+    public const string StagingNameSuffix = "[staging test]";
+
+    /// <summary>
+    /// A dry run of the current configuration against the Let's Encrypt staging
+    /// endpoint. It proves the parts that actually go wrong — the account, the
+    /// validation plugin, the credentials and the challenge — without spending a live
+    /// rate limit.
+    /// </summary>
+    /// <remarks>
+    /// The definition is deliberately isolated from the real one in three ways:
+    /// a distinct friendly name so it cannot overwrite the real renewal; no
+    /// installation steps, because binding a staging certificate to IIS or importing
+    /// it into the RDP listener would be actively harmful; and a .pfx file store, so
+    /// an untrusted certificate never lands in the machine certificate store. The
+    /// store and installation are already covered by the setup checks, so replacing
+    /// them here costs no signal.
+    /// <para>
+    /// This does create and delete real DNS records — that is the point — so pair it
+    /// with <see cref="BuildCancelRenewal"/> to remove the renewal afterwards.
+    /// </para>
+    /// </remarks>
+    public static WacsCommand BuildStagingTest(string wacsPath, RenewalDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+
+        var dryRun = new RenewalDefinition
+        {
+            Account = new AcmeAccount
+            {
+                EmailAddress = definition.Account.EmailAddress,
+                AcceptTermsOfService = definition.Account.AcceptTermsOfService,
+                UseTestServer = true,
+            },
+            Certificate = new CertificateRequest
+            {
+                FriendlyName = StagingFriendlyName(definition),
+                CommonName = definition.Certificate.CommonName,
+                HostNames = [.. definition.Certificate.HostNames],
+            },
+            Validation = definition.Validation,
+            Store = new StoreSettings
+            {
+                PluginId = "pfxfile",
+                StoreName = string.Empty,
+            },
+            Installation = new InstallationSettings(),
+        };
+
+        var args = BuildCreateRenewal(wacsPath, dryRun).Arguments.ToList();
+
+        // --pfxfilepath belongs to the pfxfile store and has no field on the model,
+        // so it is spliced in after the store rather than threaded through
+        // StoreSettings for the sake of one dry-run-only option.
+        var storeFlag = args.FindIndex(a => a.Value == "--store");
+        var insertAt = storeFlag < 0 ? args.Count : storeFlag + 2;
+
+        args.InsertRange(insertAt,
+        [
+            new WacsArgument("--pfxfilepath"),
+            new WacsArgument(StagingCertificateFolder),
+        ]);
+
+        return new WacsCommand(wacsPath, args);
+    }
+
+    /// <summary>Where a dry run's certificate is written; nothing reads it afterwards.</summary>
+    public static string StagingCertificateFolder =>
+        Path.Combine(Path.GetTempPath(), "win-acme-gui-staging");
+
+    /// <summary>
+    /// The name a dry run's renewal is stored under. Deterministic, so the cleanup
+    /// afterwards can always find it again.
+    /// </summary>
+    public static string StagingFriendlyName(RenewalDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+
+        var basis = definition.Certificate.FriendlyName.Trim();
+
+        if (basis.Length == 0)
+        {
+            basis = definition.Certificate.HostNames.FirstOrDefault() ?? "certificate";
+        }
+
+        return $"{basis} {StagingNameSuffix}";
+    }
+
+    /// <summary>
+    /// Removes a renewal by name. Used to clear up after a dry run, which would
+    /// otherwise stay in win-acme's store and be renewed by the scheduled task forever.
+    /// </summary>
+    public static WacsCommand BuildCancelRenewal(string wacsPath, string friendlyName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(friendlyName);
+
+        return new WacsCommand(
+            wacsPath,
+            [
+                new WacsArgument("--cancel"),
+                new WacsArgument("--friendlyname"),
+                new WacsArgument(friendlyName.Trim()),
+            ]);
+    }
+
     /// <summary>Lists the configured renewals so the GUI can show what is set up.</summary>
     public static WacsCommand BuildList(string wacsPath) =>
         new(wacsPath, [new WacsArgument("--list")]);
