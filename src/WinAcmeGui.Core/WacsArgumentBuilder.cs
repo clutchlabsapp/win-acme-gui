@@ -65,6 +65,13 @@ public static class WacsArgumentBuilder
     public const string StagingNameSuffix = "[staging test]";
 
     /// <summary>
+    /// win-acme's value for "do not save the certificate anywhere". It still keeps a
+    /// password-protected copy in its own cache folder; that is not a store plugin and
+    /// is left alone.
+    /// </summary>
+    public const string NoStore = "none";
+
+    /// <summary>
     /// A dry run of the current configuration against the Let's Encrypt staging
     /// endpoint. It proves the parts that actually go wrong — the account, the
     /// validation plugin, the credentials and the challenge — without spending a live
@@ -74,10 +81,10 @@ public static class WacsArgumentBuilder
     /// The definition is deliberately isolated from the real one in three ways:
     /// a distinct friendly name so it cannot overwrite the real renewal; no
     /// installation steps, because binding a staging certificate to IIS or importing
-    /// it into the RDP listener would be actively harmful; and a .pfx file store, so
-    /// an untrusted certificate never lands in the machine certificate store. The
-    /// store and installation are already covered by the setup checks, so replacing
-    /// them here costs no signal.
+    /// it into the RDP listener would be actively harmful; and no store at all, so
+    /// nothing is written to disk and no untrusted certificate reaches the machine
+    /// certificate store. Storage and installation are already covered by the setup
+    /// checks, so dropping them here costs no signal.
     /// <para>
     /// This does create and delete real DNS records — that is the point — so pair it
     /// with <see cref="BuildCancelRenewal"/> to remove the renewal afterwards.
@@ -104,32 +111,14 @@ public static class WacsArgumentBuilder
             Validation = definition.Validation,
             Store = new StoreSettings
             {
-                PluginId = "pfxfile",
+                PluginId = NoStore,
                 StoreName = string.Empty,
             },
             Installation = new InstallationSettings(),
         };
 
-        var args = BuildCreateRenewal(wacsPath, dryRun).Arguments.ToList();
-
-        // --pfxfilepath belongs to the pfxfile store and has no field on the model,
-        // so it is spliced in after the store rather than threaded through
-        // StoreSettings for the sake of one dry-run-only option.
-        var storeFlag = args.FindIndex(a => a.Value == "--store");
-        var insertAt = storeFlag < 0 ? args.Count : storeFlag + 2;
-
-        args.InsertRange(insertAt,
-        [
-            new WacsArgument("--pfxfilepath"),
-            new WacsArgument(StagingCertificateFolder),
-        ]);
-
-        return new WacsCommand(wacsPath, args);
+        return BuildCreateRenewal(wacsPath, dryRun);
     }
-
-    /// <summary>Where a dry run's certificate is written; nothing reads it afterwards.</summary>
-    public static string StagingCertificateFolder =>
-        Path.Combine(Path.GetTempPath(), "win-acme-gui-staging");
 
     /// <summary>
     /// The name a dry run's renewal is stored under. Deterministic, so the cleanup
