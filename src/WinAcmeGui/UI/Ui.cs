@@ -124,6 +124,58 @@ internal static class Ui
         return box;
     }
 
+    /// <summary>
+    /// A tab page holding a top-down stack of group boxes.
+    /// </summary>
+    /// <remarks>
+    /// AutoScroll is on as a fallback only. The window is sized so the tallest page
+    /// fits without it, but a scrollbar at an unusual font scale or DPI is better than
+    /// a control clipped off the bottom.
+    /// </remarks>
+    public static TabPage Page(string title, params Control[] groups)
+    {
+        var stack = new TableLayoutPanel
+        {
+            Dock = DockStyle.Top,
+            ColumnCount = 1,
+            AutoSize = true,
+            AutoSizeMode = AutoSizeMode.GrowAndShrink,
+        };
+
+        stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
+
+        foreach (var group in groups)
+        {
+            stack.Controls.Add(group, 0, stack.RowCount);
+            stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+            stack.RowCount++;
+        }
+
+        var page = new TabPage(title)
+        {
+            AutoScroll = true,
+            Padding = new Padding(Gap),
+            UseVisualStyleBackColor = true,
+        };
+
+        page.Controls.Add(stack);
+        return page;
+    }
+
+    /// <summary>A tab page whose single control fills it, for the output pane.</summary>
+    public static TabPage FillPage(string title, Control content)
+    {
+        var page = new TabPage(title)
+        {
+            Padding = new Padding(Gap),
+            UseVisualStyleBackColor = true,
+        };
+
+        content.Dock = DockStyle.Fill;
+        page.Controls.Add(content);
+        return page;
+    }
+
     public static TextBox Text(bool multiline = false, int height = 0)
     {
         var box = new TextBox { Multiline = multiline };

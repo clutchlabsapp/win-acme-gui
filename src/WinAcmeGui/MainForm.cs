@@ -61,6 +61,9 @@ public sealed class MainForm : Form
 
     private Button _browseScript = null!;
     private Button _installButton = null!;
+    private TabControl _tabs = null!;
+    private StatusStrip _statusStrip = null!;
+    private ToolStripStatusLabel _statusLabel = null!;
     private Button _saveCredentials = null!;
     private Button _reloadCredentials = null!;
     private FlowLayoutPanel _credentialActions = null!;
@@ -88,57 +91,37 @@ public sealed class MainForm : Form
         RefreshPreview();
     }
 
+    /// <summary>
+    /// Five tabs following the order of the job: set win-acme up, choose how ownership
+    /// is proved, say what the certificate covers, say what happens afterwards, then
+    /// verify and run.
+    /// </summary>
     private void BuildUi()
     {
-        var root = new TableLayoutPanel
+        _tabs = new TabControl { Dock = DockStyle.Fill };
+
+        _tabs.TabPages.AddRange(
+        [
+            Ui.Page("win-acme", BuildWinAcmeGroup(), BuildAccountGroup()),
+            Ui.Page("Validation", BuildValidationGroup()),
+            Ui.Page("Certificate", BuildCertificateGroup(), BuildStoreGroup()),
+            Ui.Page("After renewal", BuildInstallationGroup()),
+            Ui.FillPage("Verify and run", BuildActionArea()),
+        ]);
+
+        // Problems are raised on any tab but only listed on the last one, so a
+        // one-line summary stays visible from everywhere.
+        _statusStrip = new StatusStrip { SizingGrip = false };
+        _statusLabel = new ToolStripStatusLabel
         {
-            Dock = DockStyle.Fill,
-            ColumnCount = 1,
-            RowCount = 2,
-            Padding = new Padding(Ui.Gap),
+            Spring = true,
+            TextAlign = ContentAlignment.MiddleLeft,
         };
 
-        root.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 62f));
-        root.RowStyles.Add(new RowStyle(SizeType.Percent, 38f));
+        _statusStrip.Items.Add(_statusLabel);
 
-        root.Controls.Add(BuildSettingsArea(), 0, 0);
-        root.Controls.Add(BuildActionArea(), 0, 1);
-
-        Controls.Add(root);
-    }
-
-    private Control BuildSettingsArea()
-    {
-        var stack = new TableLayoutPanel
-        {
-            Dock = DockStyle.Top,
-            ColumnCount = 1,
-            AutoSize = true,
-            AutoSizeMode = AutoSizeMode.GrowAndShrink,
-        };
-
-        stack.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-
-        foreach (var group in new[]
-        {
-            BuildWinAcmeGroup(),
-            BuildAccountGroup(),
-            BuildCertificateGroup(),
-            BuildValidationGroup(),
-            BuildStoreGroup(),
-            BuildInstallationGroup(),
-            BuildPreviewGroup(),
-        })
-        {
-            stack.Controls.Add(group, 0, stack.RowCount);
-            stack.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-            stack.RowCount++;
-        }
-
-        var scroller = new Panel { Dock = DockStyle.Fill, AutoScroll = true };
-        scroller.Controls.Add(stack);
-        return scroller;
+        Controls.Add(_tabs);
+        Controls.Add(_statusStrip);
     }
 
     private GroupBox BuildWinAcmeGroup()
@@ -587,6 +570,8 @@ public sealed class MainForm : Form
             ? string.Empty
             : string.Join(Environment.NewLine, problems.Select(p => "• " + p));
 
+        ShowProblemSummary(problems);
+
         _preview.Text = WacsArgumentBuilder
             .BuildCreateRenewal(wacsPath.Length == 0 ? "wacs.exe" : wacsPath, definition)
             .ToDisplayString();
@@ -771,6 +756,26 @@ public sealed class MainForm : Form
                 ? "Everything checks out: these certificates will renew automatically."
                 : "Some checks did not pass. Fix the items marked FAIL above.");
         });
+    }
+
+    /// <summary>
+    /// Keeps the bottom strip in step with the problem list, so an error raised on one
+    /// tab is still visible while looking at another.
+    /// </summary>
+    private void ShowProblemSummary(IReadOnlyList<string> problems)
+    {
+        if (problems.Count == 0)
+        {
+            _statusLabel.Text = "Ready.";
+            _statusLabel.ForeColor = SystemColors.ControlText;
+            return;
+        }
+
+        _statusLabel.Text = problems.Count == 1
+            ? problems[0]
+            : $"{problems[0]}  (+{problems.Count - 1} more on Verify and run)";
+
+        _statusLabel.ForeColor = Color.Firebrick;
     }
 
     // ------------------------------------------------------ namecheap helper
