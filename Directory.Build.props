@@ -7,5 +7,7 @@
     <Product>win-acme GUI</Product>
     <Company>clutchlabs</Company>
     <Version>0.1.0</Version>
+    <Copyright>Copyright (C) 2026 clutchlabsapp</Copyright>
+    <PackageLicenseExpression>AGPL-3.0-or-later</PackageLicenseExpression>
   </PropertyGroup>
 </Project>

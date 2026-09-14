@@ -127,6 +127,17 @@ dotnet test tests/WinAcmeGui.Core.Tests/WinAcmeGui.Core.Tests.csproj
 `WinAcmeGui.Core`, which has no Windows or UI dependencies, so it is covered by unit
 tests; the WinForms project is a thin layer over it.
 
+## Licence
+
+This tool is licensed under the **GNU Affero General Public License v3.0 or later** —
+see [LICENSE](LICENSE). In short: you may use, modify and redistribute it, but derived
+versions must stay under the same licence, and that obligation extends to anyone you
+let use a modified version over a network.
+
+It bundles no third-party code. [Fynydd.NameCheap](https://github.com/fynydd/Fynydd.NameCheap)
+is GPLv3 and deliberately **not** included; you build and run your own copy, and this
+tool only invokes it. win-acme itself is a separate program you download and run.
+
 ## Credit
 
 All the actual certificate work is done by [win-acme](https://www.win-acme.com/), an
