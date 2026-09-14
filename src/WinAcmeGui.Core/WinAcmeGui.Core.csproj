@@ -6,4 +6,10 @@
     <AssemblyName>WinAcmeGui.Core</AssemblyName>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- One copy of the script: reviewable in the repo, shipped inside the assembly. -->
+    <EmbeddedResource Include="..\..\scripts\Set-RdpListenerCertificate.ps1"
+                      LogicalName="WinAcmeGui.Core.Scripts.Set-RdpListenerCertificate.ps1" />
+  </ItemGroup>
+
 </Project>

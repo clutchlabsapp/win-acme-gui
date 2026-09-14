@@ -28,6 +28,12 @@ public sealed class InstallationScriptPreset
     public bool IsNone => Id == InstallationPresets.NoneId;
 
     public bool IsCustom => Id == InstallationPresets.CustomId;
+
+    /// <summary>
+    /// True when the script ships with this tool rather than with win-acme, so it has
+    /// to be written to disk before a renewal can run it.
+    /// </summary>
+    public bool ProvidedByTool { get; init; }
 }
 
 /// <summary>
@@ -39,6 +45,12 @@ public static class InstallationPresets
 {
     public const string NoneId = "none";
     public const string CustomId = "custom";
+
+    /// <summary>The bundled win-acme RDP listener script.</summary>
+    public const string RdListenerBundledId = "rdlistener";
+
+    /// <summary>This tool's own RDP listener script.</summary>
+    public const string RdListenerToolId = "rdlistener-gui";
 
     /// <summary>Tokens win-acme substitutes into --scriptparameters.</summary>
     public static IReadOnlyList<string> ParameterTokens { get; } =
@@ -72,6 +84,25 @@ public static class InstallationPresets
             RequiredStoreName = "My",
             Description = "Binds the new certificate to the RDP listener on this machine.",
         },
+        new InstallationScriptPreset
+        {
+            Id = InstallationPresets.RdListenerToolId,
+            DisplayName = "Remote Desktop listener (this tool's script)",
+            ScriptFileName = InstallScriptWriter.RdpListenerScriptName,
+            ProvidedByTool = true,
+
+            // Named parameters, unlike the bundled script's positional one.
+            DefaultParameters = "-Thumbprint '{CertThumbprint}' -CacheFile '{CacheFile}' "
+                                + "-CachePassword '{CachePassword}'",
+
+            // No RequiredStoreName: this script copies the certificate into
+            // LocalMachine\My itself, and falls back to importing win-acme's cached
+            // .pfx when no Windows store was used at all.
+            Description = "Same job as the bundled script, but it reports failure to win-acme instead "
+                          + "of exiting zero, verifies the binding afterwards, and works even when the "
+                          + "certificate was never put in the Windows store.",
+        },
+
         new InstallationScriptPreset
         {
             Id = "rdgateway",
