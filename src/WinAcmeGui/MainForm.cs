@@ -50,7 +50,21 @@ public sealed class MainForm : Form
     private readonly TextBox _sslPort = Ui.Text();
     private readonly TextBox _sslIpAddress = Ui.Text();
 
+    private readonly CheckBox _enableRdp = new() { Text = "Update the Remote Desktop listener", AutoSize = true };
+    private readonly ComboBox _rdpScript = new() { DropDownStyle = ComboBoxStyle.DropDownList };
+
+    private readonly CheckBox _enableScript = new() { Text = "Run another script", AutoSize = true };
     private readonly ComboBox _scriptPreset = new() { DropDownStyle = ComboBoxStyle.DropDownList };
+
+    /// <summary>Presets offered by the Other script section: everything but the RD listener ones.</summary>
+    private readonly List<InstallationScriptPreset> _otherScripts = [];
+
+    /// <summary>The two RD listener presets, in the order the section lists them.</summary>
+    private static readonly string[] RdpScriptIds =
+    [
+        InstallationPresets.RdListenerBundledId,
+        InstallationPresets.RdListenerToolId,
+    ];
     private readonly TextBox _scriptPath = Ui.Text();
     private readonly TextBox _scriptParameters = Ui.Text();
 
@@ -117,7 +131,7 @@ public sealed class MainForm : Form
             Ui.Page("win-acme", BuildWinAcmeGroup(), BuildAccountGroup(), BuildExportGroup()),
             Ui.Page("Validation", BuildValidationGroup()),
             Ui.Page("Certificate", BuildCertificateGroup(), BuildStoreGroup()),
-            Ui.Page("After renewal", BuildInstallationGroup()),
+            Ui.Page("After renewal", BuildIisGroup(), BuildRdpGroup(), BuildOtherScriptGroup()),
             Ui.FillPage("Verify and run", BuildActionArea()),
         ]);
 
@@ -334,31 +348,60 @@ public sealed class MainForm : Form
         return Ui.Group("Certificate store", grid);
     }
 
-    private GroupBox BuildInstallationGroup()
+    private GroupBox BuildIisGroup()
     {
         var grid = Ui.Grid();
 
-        _updateIis.CheckedChanged += OnInputChanged;
+        _updateIis.CheckedChanged += OnSectionToggled;
         _iisSiteId.TextChanged += OnInputChanged;
         _sslPort.TextChanged += OnInputChanged;
         _sslIpAddress.TextChanged += OnInputChanged;
-        _scriptPath.TextChanged += OnInputChanged;
-        _scriptParameters.TextChanged += OnInputChanged;
-
-        _scriptPreset.Items.AddRange([.. InstallationPresets.Scripts.Select(p => (object)p.DisplayName)]);
-        _scriptPreset.SelectedIndexChanged += OnScriptPresetChanged;
 
         Ui.AddFullWidth(grid, _updateIis);
         Ui.AddRow(grid, "IIS site ID", _iisSiteId, "Optional. Blank installs to the site the binding belongs to.");
         Ui.AddRow(grid, "HTTPS port", _sslPort, "Optional. Blank means 443.");
         Ui.AddRow(grid, "HTTPS IP address", _sslIpAddress, "Optional. Blank means all addresses.");
 
-        Ui.AddRow(grid, "Run after renewal", _scriptPreset,
-            "The Remote Desktop and Exchange scripts ship inside win-acme's own Scripts folder.");
+        return Ui.Group("IIS bindings", grid);
+    }
+
+    private GroupBox BuildRdpGroup()
+    {
+        var grid = Ui.Grid();
+
+        _enableRdp.CheckedChanged += OnSectionToggled;
+
+        _rdpScript.Items.AddRange(
+            [.. RdpScriptIds.Select(id => (object)InstallationPresets.Find(id)!.DisplayName)]);
+        _rdpScript.SelectedIndex = 0;
+        _rdpScript.SelectedIndexChanged += OnSectionToggled;
+
+        Ui.AddFullWidth(grid, _enableRdp);
+        Ui.AddRow(grid, "Script", _rdpScript,
+            "win-acme's own script is the default. This tool's alternative reports failures to "
+            + "win-acme instead of exiting zero, and works even without the Windows certificate store.");
+
+        return Ui.Group("Remote Desktop listener", grid);
+    }
+
+    private GroupBox BuildOtherScriptGroup()
+    {
+        var grid = Ui.Grid();
+
+        _enableScript.CheckedChanged += OnSectionToggled;
+        _scriptPath.TextChanged += OnInputChanged;
+        _scriptParameters.TextChanged += OnInputChanged;
+
+        _otherScripts.Clear();
+        _otherScripts.AddRange(InstallationPresets.Scripts.Where(
+            p => !p.IsNone && !RdpScriptIds.Contains(p.Id, StringComparer.OrdinalIgnoreCase)));
+
+        _scriptPreset.Items.AddRange([.. _otherScripts.Select(p => (object)p.DisplayName)]);
+        _scriptPreset.SelectedIndex = 0;
+        _scriptPreset.SelectedIndexChanged += OnScriptPresetChanged;
 
         var scriptRow = new TableLayoutPanel
         {
-            Dock = DockStyle.Fill,
             ColumnCount = 2,
             AutoSize = true,
             AutoSizeMode = AutoSizeMode.GrowAndShrink,
@@ -374,11 +417,113 @@ public sealed class MainForm : Form
         scriptRow.Controls.Add(_scriptPath, 0, 0);
         scriptRow.Controls.Add(_browseScript, 1, 0);
 
+        Ui.AddFullWidth(grid, _enableScript);
+        Ui.AddRow(grid, "Which", _scriptPreset);
         Ui.AddRow(grid, "Script", scriptRow);
         Ui.AddRow(grid, "Parameters", _scriptParameters,
             "Tokens: " + string.Join("  ", InstallationPresets.ParameterTokens));
 
-        return Ui.Group("After renewal", grid);
+        return Ui.Group("Other script", grid);
+    }
+
+    /// <summary>
+    /// win-acme runs at most one script, so the two script sections cannot both be on.
+    /// Ticking one turns the other off rather than silently dropping it at run time.
+    /// </summary>
+    private void OnSectionToggled(object? sender, EventArgs e)
+    {
+        if (_updatingUi)
+        {
+            return;
+        }
+
+        _updatingUi = true;
+        try
+        {
+            if (ReferenceEquals(sender, _enableRdp) && _enableRdp.Checked)
+            {
+                _enableScript.Checked = false;
+            }
+            else if (ReferenceEquals(sender, _enableScript) && _enableScript.Checked)
+            {
+                _enableRdp.Checked = false;
+            }
+        }
+        finally
+        {
+            _updatingUi = false;
+        }
+
+        ApplyRequiredStoreName();
+        UpdateSectionControls();
+        RefreshPreview();
+    }
+
+    /// <summary>
+    /// The bundled RD scripts only search LocalMachine\My, so a blank store — which
+    /// means WebHosting — would leave them finding nothing. Filling in a blank field
+    /// helps; overwriting a deliberate choice does not, so only do the former.
+    /// </summary>
+    private void ApplyRequiredStoreName()
+    {
+        var required = SelectedScriptPreset.RequiredStoreName;
+
+        if (required.Length == 0 || _storeName.Text.Trim().Length > 0)
+        {
+            return;
+        }
+
+        _updatingUi = true;
+        try
+        {
+            _storeName.Text = required;
+        }
+        finally
+        {
+            _updatingUi = false;
+        }
+    }
+
+    /// <summary>Each section shows its options only while its checkbox is ticked.</summary>
+    private void UpdateSectionControls()
+    {
+        _iisSiteId.Enabled = _updateIis.Checked;
+        _sslPort.Enabled = _updateIis.Checked;
+        _sslIpAddress.Enabled = _updateIis.Checked;
+
+        _rdpScript.Enabled = _enableRdp.Checked;
+
+        _scriptPreset.Enabled = _enableScript.Checked;
+        _scriptParameters.Enabled = _enableScript.Checked;
+
+        var preset = SelectedOtherScript;
+        _scriptPath.Enabled = _enableScript.Checked;
+        _scriptPath.ReadOnly = preset is null || !preset.IsCustom;
+        _browseScript.Enabled = _enableScript.Checked && preset is { IsCustom: true };
+    }
+
+    private InstallationScriptPreset? SelectedOtherScript =>
+        _scriptPreset.SelectedIndex >= 0 && _scriptPreset.SelectedIndex < _otherScripts.Count
+            ? _otherScripts[_scriptPreset.SelectedIndex]
+            : null;
+
+    private InstallationScriptPreset RdpPreset =>
+        InstallationPresets.Find(RdpScriptIds[Math.Max(_rdpScript.SelectedIndex, 0)])!;
+
+    /// <summary>The preset the two script sections resolve to, or none.</summary>
+    private InstallationScriptPreset SelectedScriptPreset
+    {
+        get
+        {
+            if (_enableRdp.Checked)
+            {
+                return RdpPreset;
+            }
+
+            return _enableScript.Checked
+                ? SelectedOtherScript ?? InstallationPresets.None
+                : InstallationPresets.None;
+        }
     }
 
     private GroupBox BuildPreviewGroup()
@@ -482,11 +627,6 @@ public sealed class MainForm : Form
     private void OnChallengeModeChanged(object? sender, EventArgs e) =>
         ShowProvidersFor(SelectedChallenge, SelectedPlugin?.Id);
 
-    private InstallationScriptPreset SelectedScriptPreset =>
-        _scriptPreset.SelectedIndex >= 0 && _scriptPreset.SelectedIndex < InstallationPresets.Scripts.Count
-            ? InstallationPresets.Scripts[_scriptPreset.SelectedIndex]
-            : InstallationPresets.None;
-
     private void ApplySettings()
     {
         _wacsPath.Text = WacsLocator.Locate(_settings.WacsPath) ?? _settings.WacsPath;
@@ -508,25 +648,7 @@ public sealed class MainForm : Form
         _sslPort.Text = _settings.Installation.SslPort;
         _sslIpAddress.Text = _settings.Installation.SslIpAddress;
 
-        var presetIndex = InstallationPresets.Scripts
-            .ToList()
-            .FindIndex(p => string.Equals(p.Id, _settings.Installation.ScriptPresetId, StringComparison.OrdinalIgnoreCase));
-
-        // Selecting a preset resets the parameters to that preset's defaults, so the
-        // remembered values have to go in afterwards, not before.
-        _scriptPreset.SelectedIndex = presetIndex >= 0 ? presetIndex : 0;
-
-        if (_settings.Installation.ScriptParameters.Length > 0)
-        {
-            _scriptParameters.Text = _settings.Installation.ScriptParameters;
-        }
-
-        if (_settings.Installation.ScriptPath.Length > 0)
-        {
-            _scriptPath.Text = _settings.Installation.ScriptPath;
-        }
-
-        UpdateScriptControls();
+        RestoreScriptSections(_settings.Installation);
 
         var remembered = PluginCatalog.Find(_settings.ValidationPluginId);
         var challenge = remembered?.ValidationMode ?? PluginCatalog.DnsChallenge;
@@ -625,9 +747,50 @@ public sealed class MainForm : Form
         RefreshPreview();
     }
 
+    /// <summary>
+    /// Puts the remembered preset back into whichever section owns it, then restores
+    /// the saved path and parameters — selecting a preset resets those to its
+    /// defaults, so they have to go in afterwards.
+    /// </summary>
+    private void RestoreScriptSections(InstallationSettings installation)
+    {
+        var rdpIndex = Array.FindIndex(
+            RdpScriptIds,
+            id => string.Equals(id, installation.ScriptPresetId, StringComparison.OrdinalIgnoreCase));
+
+        var otherIndex = _otherScripts.FindIndex(
+            p => string.Equals(p.Id, installation.ScriptPresetId, StringComparison.OrdinalIgnoreCase));
+
+        _updatingUi = true;
+        try
+        {
+            _enableRdp.Checked = rdpIndex >= 0;
+            _rdpScript.SelectedIndex = rdpIndex >= 0 ? rdpIndex : 0;
+
+            _enableScript.Checked = otherIndex >= 0;
+            _scriptPreset.SelectedIndex = otherIndex >= 0 ? otherIndex : 0;
+        }
+        finally
+        {
+            _updatingUi = false;
+        }
+
+        if (installation.ScriptParameters.Length > 0)
+        {
+            _scriptParameters.Text = installation.ScriptParameters;
+        }
+
+        if (installation.ScriptPath.Length > 0)
+        {
+            _scriptPath.Text = installation.ScriptPath;
+        }
+
+        UpdateSectionControls();
+    }
+
     private void OnScriptPresetChanged(object? sender, EventArgs e)
     {
-        var preset = SelectedScriptPreset;
+        var preset = SelectedOtherScript ?? InstallationPresets.None;
 
         _updatingUi = true;
         try
@@ -652,18 +815,8 @@ public sealed class MainForm : Form
             _updatingUi = false;
         }
 
-        UpdateScriptControls();
+        UpdateSectionControls();
         RefreshPreview();
-    }
-
-    private void UpdateScriptControls()
-    {
-        var preset = SelectedScriptPreset;
-
-        _scriptPath.Enabled = !preset.IsNone;
-        _scriptPath.ReadOnly = !preset.IsCustom;
-        _browseScript.Enabled = preset.IsCustom;
-        _scriptParameters.Enabled = !preset.IsNone;
     }
 
     private void OnBrowseScript(object? sender, EventArgs e)
@@ -738,6 +891,12 @@ public sealed class MainForm : Form
             _updatingUi = true;
             _scriptPath.Text = resolved;
             _updatingUi = false;
+        }
+
+        if (preset.ProvidedByTool)
+        {
+            // Written next to wacs.exe just before the run, so it is not missing.
+            return Array.Empty<string>();
         }
 
         return resolved.Length > 0 && !File.Exists(resolved)
@@ -827,7 +986,7 @@ public sealed class MainForm : Form
 
         SaveSettings();
 
-        if (!EnsureExportFolder(definition))
+        if (!EnsureExportFolder(definition) || !EnsureInstallScript())
         {
             return;
         }
@@ -929,7 +1088,7 @@ public sealed class MainForm : Form
             return;
         }
 
-        if (!EnsureExportFolder(CurrentDefinition()))
+        if (!EnsureExportFolder(CurrentDefinition()) || !EnsureInstallScript())
         {
             return;
         }
@@ -1023,6 +1182,59 @@ public sealed class MainForm : Form
                 $"Could not create the export folder:{Environment.NewLine}{Environment.NewLine}"
                 + $"{store.ExportFolder}{Environment.NewLine}{Environment.NewLine}{exception.Message}",
                 "Export folder",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Error);
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Puts this tool's own post-renewal script on disk before win-acme is asked to
+    /// run it. It is embedded in the assembly, so there is nothing for the user to
+    /// download or copy.
+    /// </summary>
+    private bool EnsureInstallScript()
+    {
+        var preset = SelectedScriptPreset;
+
+        if (!preset.ProvidedByTool)
+        {
+            return true;
+        }
+
+        var folder = WacsLocator.ScriptsFolder(WacsPathOrDefault());
+
+        if (folder.Length == 0)
+        {
+            MessageBox.Show(
+                this,
+                "Point the tool at wacs.exe first — the script is written into win-acme's Scripts folder.",
+                "Post-renewal script",
+                MessageBoxButtons.OK,
+                MessageBoxIcon.Information);
+
+            return false;
+        }
+
+        try
+        {
+            if (InstallScriptWriter.IsUpToDate(folder, preset.ScriptFileName))
+            {
+                return true;
+            }
+
+            var path = InstallScriptWriter.WriteScript(folder, preset.ScriptFileName);
+            AppendLog($"Wrote {path}.");
+            return true;
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            MessageBox.Show(
+                this,
+                $"Could not write {preset.ScriptFileName} into {folder}:"
+                + $"{Environment.NewLine}{Environment.NewLine}{exception.Message}",
+                "Post-renewal script",
                 MessageBoxButtons.OK,
                 MessageBoxIcon.Error);
 
