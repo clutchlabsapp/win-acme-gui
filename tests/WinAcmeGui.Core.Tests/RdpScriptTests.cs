@@ -69,8 +69,19 @@ public class RdpScriptTests : IDisposable
         // Reads the value back rather than trusting the write.
         Assert.Contains("$applied", script, StringComparison.Ordinal);
 
-        // wmic is deprecated and being removed from Windows.
-        Assert.DoesNotContain("wmic", script, StringComparison.OrdinalIgnoreCase);
+        // wmic is deprecated and being removed from Windows. The header comment names
+        // it when explaining why it is avoided, so only the executable body counts.
+        Assert.DoesNotContain("wmic", BodyOf(script), StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Set-CimInstance", script, StringComparison.Ordinal);
+    }
+
+    /// <summary>The script with its leading comment-based help removed.</summary>
+    private static string BodyOf(string script)
+    {
+        var end = script.IndexOf("#>", StringComparison.Ordinal);
+
+        Assert.True(end >= 0, "Expected the script to open with a comment-based help block.");
+        return script[(end + 2)..];
     }
 
     [Fact]
